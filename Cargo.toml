@@ -1,0 +1,6 @@
+[workspace]
+resolver = "2"
+# Add reviewed program and shared-crate manifests explicitly during P1/P2.
+members = []
+exclude = ["vendor"]
+

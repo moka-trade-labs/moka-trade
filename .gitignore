@@ -1,0 +1,28 @@
+# Local and secret configuration
+.env
+.env.*
+!.env.example
+*.keypair.json
+keys/
+deployments/private/
+.claude/settings.local.json
+
+# Dependencies and build output
+node_modules/
+.pnpm-store/
+.next/
+dist/
+coverage/
+target/
+.anchor/
+test-ledger/
+
+# Tool-local state
+.token-optimizer/
+
+# Editors and operating systems
+.DS_Store
+.idea/
+.vscode/
+*.swp
+
