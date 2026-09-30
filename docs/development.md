@@ -68,7 +68,7 @@ Other useful commands:
 | --- | --- |
 | `crates/moka-types` | Pins (`pins.rs`) and fixed-point units (`units.rs`). `no_std`, no Solana dependency |
 | `crates/moka-math` | Checked `mul_div`/bps helpers with explicit rounding (CAP-07) |
-| `tests/` (`moka-tests`) | Integration tests. `src/svm.rs` is the LiteSVM harness (`Harness::new`, `init_market_group`, `send_wrapper`, and CAP-13 `snapshot`/`trace`/`reconcile`); `load_pinned_program(name)` is the only way to load an upstream `.so`. Wrapper instructions are encoded by the pinned `percolator-prog` crate (git dependency at `WRAPPER_COMMIT`) |
+| `tests/` (`moka-tests`) | Integration tests. `src/svm.rs` is the LiteSVM harness (`Harness::new`, `init_market_group`, `send_wrapper`; trader helpers `new_trader`/`open_portfolio`/`deposit`/`withdraw`/`close_portfolio`; CAP-13 `snapshot`/`trace`/`reconcile`; `custom_error` + `err::*` to assert exact rejection codes); `load_pinned_program(name)` is the only way to load an upstream `.so`. Wrapper instructions are encoded by the pinned `percolator-prog` crate (git dependency at `WRAPPER_COMMIT`) |
 | `programs/*` | Empty until Phases 3–5 |
 | `scripts/` | Toolchain, upstream build, SessionStart hook |
 
@@ -98,7 +98,7 @@ fn cap_13_deposit_reconciles() {
 }
 ```
 
-Run one file with `cargo test -p moka-tests --test market_group -- --nocapture`. For account lists and argument choices, read the matching helper in `vendor/percolator-prog/tests/support/v16_svm.rs` (e.g. `init_primary_portfolio`, `deposit_primary`, `trade_cpi`).
+Run one file with `cargo test -p moka-tests --test portfolio -- --nocapture` (prints the per-step balance trace). A negative test must assert the exact error with `assert_eq!(custom_error(&result), Some(err::...))`, never just `is_err()`, so it cannot pass for the wrong reason. For account lists and argument choices, read the matching helper in `vendor/percolator-prog/tests/support/v16_svm.rs` (e.g. `init_primary_portfolio`, `deposit_primary`, `trade_cpi`).
 
 ### Bumping a pin
 
