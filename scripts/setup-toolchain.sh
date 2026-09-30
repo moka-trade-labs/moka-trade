@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 # Install the pinned SBF toolchain: Agave cargo-build-sbf + platform-tools.
 #
-# Downloads only from GitHub releases (release.anza.xyz may be blocked) and
-# pre-installs platform-tools, because Agave 3.x cargo-build-sbf otherwise
+# Downloads only from GitHub releases (release.anza.xyz may be blocked),
+# verifies each tarball against scripts/pins.env, and pre-installs platform-tools, because Agave 3.x cargo-build-sbf otherwise
 # tries to fetch them itself. Idempotent: a second run only re-links.
 #
 # Usage: scripts/setup-toolchain.sh
@@ -30,27 +30,36 @@ if [[ "$(uname -s)-$(uname -m)" != "Linux-x86_64" ]]; then
   exit 1
 fi
 
-download() { # url dest
-  curl --fail --location --silent --show-error --retry 4 --retry-delay 2 -o "$2.part" "$1"
-  mv "$2.part" "$2"
+# install <url> <sha256> <dest-dir>: download, verify, unpack into a temp dir
+# and move into place, so an interrupted run never leaves a half-installed
+# tree that later runs would mistake for a complete one.
+install() {
+  local url="$1" sha="$2" dest="$3" tmp
+  tmp="$(mktemp -d "$(dirname "$dest")/.install.XXXXXX")"
+  trap 'rm -rf "$tmp"' RETURN
+  curl --fail --location --silent --show-error --retry 4 --retry-delay 2 -o "$tmp/pkg.tar.bz2" "$url"
+  if ! echo "$sha  $tmp/pkg.tar.bz2" | sha256sum -c --quiet -; then
+    log "sha256 mismatch for $url (expected $sha); refusing to install"
+    exit 1
+  fi
+  mkdir "$tmp/root"
+  tar -xjf "$tmp/pkg.tar.bz2" -C "$tmp/root"
+  rm -rf "$dest"
+  mv "$tmp/root" "$dest"
 }
 
 if [[ ! -x "$AGAVE_BIN/cargo-build-sbf" ]]; then
   log "installing Agave $AGAVE_VERSION into $AGAVE_DIR"
-  mkdir -p "$AGAVE_DIR"
-  tarball="$AGAVE_DIR/solana-release.tar.bz2"
-  download "https://github.com/anza-xyz/agave/releases/download/$AGAVE_VERSION/solana-release-x86_64-unknown-linux-gnu.tar.bz2" "$tarball"
-  tar -xjf "$tarball" -C "$AGAVE_DIR"
-  rm -f "$tarball"
+  mkdir -p "$MOKA_TOOLS_DIR"
+  install "https://github.com/anza-xyz/agave/releases/download/$AGAVE_VERSION/solana-release-x86_64-unknown-linux-gnu.tar.bz2" \
+    "$AGAVE_TARBALL_SHA256" "$AGAVE_DIR"
 fi
 
 if [[ ! -x "$PT_DIR/llvm/bin/llvm-objcopy" ]]; then
   log "installing platform-tools $PLATFORM_TOOLS_VERSION into $PT_DIR"
-  mkdir -p "$PT_DIR"
-  tarball="$PT_DIR.tar.bz2"
-  download "https://github.com/anza-xyz/platform-tools/releases/download/$PLATFORM_TOOLS_VERSION/platform-tools-linux-x86_64.tar.bz2" "$tarball"
-  tar -xjf "$tarball" -C "$PT_DIR"
-  rm -f "$tarball"
+  mkdir -p "$(dirname "$PT_DIR")"
+  install "https://github.com/anza-xyz/platform-tools/releases/download/$PLATFORM_TOOLS_VERSION/platform-tools-linux-x86_64.tar.bz2" \
+    "$PLATFORM_TOOLS_TARBALL_SHA256" "$PT_DIR"
 fi
 
 # cargo-build-sbf looks for platform-tools inside the SDK; its strip step can
