@@ -98,7 +98,7 @@ Each module = about 1–2 weeks at 1–2 hours a day. Every module ends with an 
 - Exercise: an AMM program plus a LiteSVM test that manipulates it and measures the attacker's cost vs a perp payout (feeds Phase 5).
 
 **D4 — Mechanism and incentive design.** Funded rewards, wash-trading resistance, keeper economics, auctions.
-- Read: Paradigm research on MEV and auctions; Archer and Drift JIT docs; spec BST/LP/CAP-10.
+- Read: Paradigm research on MEV and auctions; batch-auction designs and the Drift JIT docs; spec BST/LP/CAP-10.
 - Exercise: design memo for the Phase 11 backstop controller with an equal-capital test plan.
 
 ## 5. Percolator

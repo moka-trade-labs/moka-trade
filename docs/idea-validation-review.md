@@ -101,21 +101,21 @@ The simplest valid fallback is a static reserve with transparent risk limits. If
 
 The opportunity is not empty. The strongest direct overlap is no longer limited to historical hackathon submissions.
 
-| Evidence | What the primary source establishes | What it does not establish |
+| Evidence category | What primary sources establish | What they do not establish |
 |---|---|---|
-| derp.trade | Describes a mainnet beta, long-tail AMM derivatives and a published program address | Independent adoption, safe parameters or profitable underwriting |
-| derp.trade payout rules | Distinguishes displayed/sale PnL from realizable PnL constrained by pool resources | Full-profit exits on every price path |
-| Perk | Versioned docs describe permissionless markets, vAMM execution and a Percolator-derived engine | Current economic safety or compatibility with the selected upstream engine |
-| Wasabi | Documents underlying-backed spot leverage funded by vaults; API docs list Solana | Every advertised market or leverage limit being available on Solana |
-| Omnipair | Documents isolated Solana spot/margin pools combining swaps and lending | Elimination of valuation, write-off or LP risk |
+| AMM-based long-tail derivatives venues | A mainnet-beta Solana venue with long-tail AMM derivatives and a published program address | Independent adoption, safe parameters or profitable underwriting |
+| Their payout rules | Displayed/sale PnL is distinguished from realizable PnL constrained by pool resources | Full-profit exits on every price path |
+| Percolator-derived permissionless perps | Permissionless markets, vAMM execution and a Percolator-derived engine, with internal (not independent) security reviews | Current economic safety or compatibility with the selected upstream engine |
+| Spot-backed leverage | Underlying-backed spot leverage funded by vaults | Every advertised market or leverage limit being available on Solana |
+| Isolated spot/margin pools | Integrated swap-and-lending pools with internal pricing and debt write-offs | Elimination of valuation, write-off or LP risk |
 
-derp.trade's own risk and position-value pages disclose pool payout constraints.[^7] This is directly relevant to the intended promise: simply enabling a closing instruction is not equivalent to paying the profit shown on a chart. Its documentation calls the application a mainnet beta and publishes a program address, but no independent activity or bytecode verification was performed here.[^8]
+Venues that disclose pool payout constraints are directly relevant to the intended promise: simply enabling a closing instruction is not equivalent to paying the profit shown on a chart. Mainnet-beta and deployment claims are publisher-reported; no independent activity or bytecode verification was performed here.
 
-Perk's documentation overlaps strongly with the “permissionless + Percolator” pitch. Its security page distinguishes internal reviews from independent audits.[^9] Claims about its oracle independence, automatic recovery or proof coverage should not be imported as demonstrated guarantees for a new implementation.
+Claims by Percolator-derived venues about oracle independence, automatic recovery or proof coverage should not be imported as demonstrated guarantees for a new implementation.
 
-Wasabi explicitly describes spot-leverage contracts rather than synthetic perpetual exposure, while Omnipair describes an integrated spot-and-lending pool with internal pricing and debt write-offs.[^10][^11] These substitutes strengthen the need to interview users about the job they want done: leveraged buying, shorting, hedging holdings, or holding a transferable perpetual position. They do not establish demand for this particular app or backstop policy.
+Spot-leverage and spot/margin substitutes strengthen the need to interview users about the job they want done: leveraged buying, shorting, hedging holdings, or holding a transferable perpetual position. They do not establish demand for this particular app or backstop policy.
 
-The September 9 Colosseum benchmark remains useful historical evidence: Perc-o-dex, derp.trade, Squeeze, Archer, InsureOS, Uranus and Reflect overlap with components of the concept. Awards and project submissions are not customer commitments. The record and exact links remain in the [idea file](dynamic-jit-liquidity-perp.md).
+An earlier hackathon-corpus benchmark (September 9) also found submissions that overlap with individual components of the concept (Percolator forks, long-tail perps, creator seeding, batch auctions, premium-for-loss underwriting, risk-driven automation). Awards and project submissions are not customer commitments. The named sources for this section are kept in the private strategy repository.
 
 The defensible differentiation hypothesis is narrower: **admit supportable underserved markets, publish credible capacity, and buy loss-bearing capital at a price that improves net payout outcomes**. No first-ever claim is established. A reusable backstop/accounting component may also be a better entry point than another complete trading venue if distribution proves difficult.
 
@@ -186,9 +186,4 @@ Production work must include checked fixed-point arithmetic, defined rounding, b
 [^4]: Pyth Network, [Best practices](https://docs.pyth.network/price-feeds/core/best-practices), living documentation referencing the August 26, 2026 upgrade; accessed September 11, 2026. Executable-price and latency risks.
 [^5]: Uniswap, [Uniswap v2 Oracles](https://developers.uniswap.org/docs/protocols/v2/concepts/oracles), version-specific documentation; accessed September 11, 2026. TWAP economic rationale; Ethereum timing assumptions are not transferred to Solana.
 [^6]: Anatoly Yakovenko et al., [Percolator source at 8eb7142](https://github.com/aeyakovenko/percolator/blob/8eb7142aada316f6c476f5c4fa815d3a806706d5/src/v16.rs) and [wrapper manifest at d5e2ec6](https://github.com/aeyakovenko/percolator-prog/blob/d5e2ec6fa727a1049a62851c3be19c638815b4e2/Cargo.toml), inspected September 9 and rechecked in the retained snapshot September 11, 2026. The wrapper pins engine `495a5590c97055bd71c6f94d849ff0298f243145`; compatibility is not assumed.
-[^7]: derp.trade, [Risk overview](https://docs.derp.trade/docs/risk) and [Position value](https://docs.derp.trade/docs/protocol/value), living documentation; accessed September 11, 2026. Attributed payout-limit and oracle-model disclosures, not an endorsement of all safety claims on those pages.
-[^8]: derp.trade, [Introduction](https://docs.derp.trade/) and [Contract addresses](https://docs.derp.trade/docs/dev/contracts), living documentation; accessed September 11, 2026. Mainnet-beta and deployment claims are publisher-reported.
-[^9]: Perk, [Introduction](https://docs.perk.fund/introduction), labeled documentation version March 29, 2026 / protocol v1.4.1, and [Security](https://docs.perk.fund/security), accessed September 11, 2026. Product and review-scope claims, not independent proof verification.
-[^10]: Wasabi, [Leverage Trade](https://docs.wasabi.xyz/_/overview/leverage-trade) and [API Integration](https://docs.wasabi.xyz/_/overview/technical-documentation/api-integration), living documentation; accessed September 11, 2026. Spot-leverage mechanics and listed chain support. The page contains different headline and step-level leverage limits; no numerical limit is relied upon.
-[^11]: Omnipair, [Introduction](https://docs.omnipair.fi/), living documentation; accessed September 11, 2026. Attributed isolated spot/margin design; “oracle-less” means no external oracle in that design, not no valuation or loss risk.
 [^12]: Solana Foundation, [Build Fully Onchain Perps on Solana](https://solana.com/news/build-onchain-perps), June 1, 2026; accessed September 11, 2026. Onchain-execution and participant-pricing preferences are distinct.

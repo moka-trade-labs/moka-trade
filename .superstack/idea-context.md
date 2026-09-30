@@ -20,7 +20,7 @@
   "confidence": 0.65,
   "demand_signals": [
     {"type": "weak", "evidence": "User-provided ADL anecdote; no verified customer commitment."},
-    {"type": "adjacent_product", "evidence": "Primary docs describe derp.trade, Perk, Wasabi and Omnipair overlap; not evidence of demand for this product."}
+    {"type": "adjacent_product", "evidence": "Primary docs describe overlapping long-tail derivatives venues, Percolator-derived perps and spot-leverage substitutes; not evidence of demand for this product."}
   ],
   "risks": [
     {"category": "technical", "description": "Thin reference liquidity may permit profitable extraction from pool and backstop.", "severity": "critical"},
