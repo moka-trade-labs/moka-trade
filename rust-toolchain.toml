@@ -1,0 +1,6 @@
+# Host toolchain for workspace crates and tests. SBF programs are built with
+# platform-tools from scripts/setup-toolchain.sh (see scripts/pins.env).
+[toolchain]
+channel = "1.94.1"
+components = ["rustfmt", "clippy"]
+profile = "minimal"

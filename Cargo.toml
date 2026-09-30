@@ -1,6 +1,34 @@
 [workspace]
 resolver = "2"
-# Add reviewed program and shared-crate manifests explicitly during P1/P2.
-members = []
+members = [
+    "crates/moka-types",
+    "crates/moka-math",
+    "tests",
+]
+# Programs join the workspace as they are added (Phase 3+). Upstream clones in
+# vendor/ are built by scripts/build-upstream.sh, never as workspace members.
 exclude = ["vendor"]
 
+[workspace.package]
+version = "0.0.0"
+edition = "2021"
+rust-version = "1.94"
+license = "Apache-2.0"
+publish = false
+
+[workspace.dependencies]
+moka-types = { path = "crates/moka-types" }
+moka-math = { path = "crates/moka-math" }
+sha2 = "0.10"
+
+[workspace.lints.rust]
+unsafe_code = "forbid"
+
+[workspace.lints.clippy]
+# CAP-07: checked arithmetic only; no floats in financial paths.
+arithmetic_side_effects = "deny"
+cast_possible_truncation = "deny"
+cast_possible_wrap = "deny"
+cast_sign_loss = "deny"
+float_arithmetic = "deny"
+unwrap_used = "deny"

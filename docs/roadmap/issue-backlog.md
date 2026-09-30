@@ -1,4 +1,6 @@
-# Initial issue backlog (create after the planning PR merges)
+# Initial issue backlog
+
+**Created 2026-09-30** as GitHub issues [#2](https://github.com/moka-trade-labs/moka-trade/issues/2)–[#35](https://github.com/moka-trade-labs/moka-trade/issues/35) (backlog item *n* is issue *n + 1*). The session tooling could create issues and labels but not milestones, so each issue carries a `phase:N` label and names its milestone in the body. Create the milestones in the GitHub UI and bulk-assign by label.
 
 Each line becomes one GitHub issue under the named milestone. The labels and template are in `docs/architecture/repo-and-tracking.md` §3. Track B phases get their issues when Track A reaches Phase 8.
 

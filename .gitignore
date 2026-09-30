@@ -26,3 +26,7 @@ test-ledger/
 .vscode/
 *.swp
 
+
+# Pinned upstream checkouts and build outputs (scripts/build-upstream.sh)
+vendor/*
+!vendor/.gitkeep

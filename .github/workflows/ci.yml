@@ -1,0 +1,70 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  rust:
+    name: fmt, clippy, tests
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      # rust-toolchain.toml pins the host toolchain; rustup installs it on first use.
+      - run: rustup show active-toolchain
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo fmt --all --check
+      - run: cargo clippy --workspace --all-targets --locked -- -D warnings
+      - run: cargo test --workspace --locked
+
+  upstream:
+    name: pinned upstream build (TEST-08)
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: Cache SBF toolchain
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cache/moka-toolchain
+            ~/.cache/solana
+          key: sbf-toolchain-${{ hashFiles('scripts/pins.env', 'scripts/setup-toolchain.sh') }}
+      - name: Cache cargo registry and git deps
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+          key: upstream-cargo-${{ hashFiles('scripts/pins.env') }}
+      - run: scripts/setup-toolchain.sh
+      - run: scripts/build-upstream.sh
+      - name: Verify artifacts from Rust (moka-tests)
+        run: cargo test -p moka-tests --locked --test pins
+      - uses: actions/upload-artifact@v4
+        with:
+          name: upstream-sbf
+          path: |
+            vendor/artifacts/*.so
+            scripts/upstream-hashes.sha256
+
+  hygiene:
+    name: scripts and secrets
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - run: shellcheck scripts/*.sh
+      - name: No keypairs or env files committed
+        run: |
+          bad="$(git ls-files | grep -E '(^|/)\.env($|\.)|keypair.*\.json$|(^|/)id\.json$' | grep -v '\.env\.example$' || true)"
+          if [ -n "$bad" ]; then echo "Committed secret-like files:"; echo "$bad"; exit 1; fi

@@ -6,12 +6,13 @@ Read this first in any new session (human or agent). Update it before ending a s
 
 A Solana perpetuals DEX for freshly launched tokens that have a graduated DEX pool but no perp market. Any token passing onchain listing rules is listed permissionlessly. Each token gets its **own** Percolator market group (own USDC vault, insurance and backing). The mark price comes onchain from its **deepest DEX pool**. Traders send signed IOC orders to a real-capital **maker tranche**; a **backing tranche** earns Percolator's native, stress-responsive backing yield. Winners are paid in USDC.
 
-## 2. Current state (2026-09-30)
+## 2. Current state (2026-09-30, end of session 2)
 
-- **Code:** none yet. Docs, plans and research only. The next step is Phase 1 (repo tooling/CI), then Phase 2 (LiteSVM slice).
-- **Upstream pin (accepted):** wrapper `aeyakovenko/percolator-prog@5cb331dde354517c6371a8acf92cecb194f3bb73` + engine `aeyakovenko/percolator@4db11a8cb0053815e23a35d3a7d3edc265d8d866`, used unmodified.
-- **Verified in a cloud container:** engine 197/197 tests pass. Wrapper builds (sha256 `558778ee…546c`), and its suite runs 1,876 pass / 173 fail. The failures are upstream's documented open-finding tests plus certification guards pinned to engine `94979ede`, classified in the P1 record §2.2.
-- **Branch/PR:** planning work is on `claude/brave-meitner-ii42xc`; PR [moka-trade-labs/moka-trade#1](https://github.com/moka-trade-labs/moka-trade/pull/1) targets `main`. After merge, create issues from `docs/roadmap/issue-backlog.md`.
+- **Planning PR merged:** [moka-trade-labs/moka-trade#1](https://github.com/moka-trade-labs/moka-trade/pull/1).
+- **Tracking:** backlog issues [#2](https://github.com/moka-trade-labs/moka-trade/issues/2)–[#35](https://github.com/moka-trade-labs/moka-trade/issues/35) created with `phase:N`, `area:*`, `type:*` labels. **Milestones and the project board are not created yet** (the session tooling cannot); the owner creates them in the GitHub UI and bulk-assigns by `phase:N` label.
+- **Phase 1 (repo tooling and CI):** all deliverables on branch `claude/compassionate-shannon-43swup`, covering issues #2–#7: `scripts/setup-toolchain.sh`, `scripts/build-upstream.sh`, `scripts/build-sbf.sh`, `scripts/pins.env`, `scripts/upstream-hashes.sha256`, the Cargo workspace (`crates/moka-types`, `crates/moka-math`, `tests` = `moka-tests`), `.github/workflows/ci.yml`, issue/PR templates, and the SessionStart hook (`.claude/settings.json` → `scripts/session-start.sh`). Local guide: `docs/development.md`. Phase 1 is done when CI is green on `main`; CI has not run yet.
+- **Verified in a cloud container:** a clean `setup-toolchain.sh && build-upstream.sh` (about 100 s + 4 min) reproduced all four pinned hashes, with the wrapper at `558778ee…546c` (P1 record §2). `cargo fmt/clippy -D warnings/test` pass (7 tests).
+- **Upstream pin (unchanged):** wrapper `aeyakovenko/percolator-prog@5cb331dd` + engine `aeyakovenko/percolator@4db11a8c`, used unmodified.
 
 ## 3. Owner decisions (all dated 2026-09-30)
 
@@ -44,11 +45,13 @@ A Solana perpetuals DEX for freshly launched tokens that have a graduated DEX po
 - Agave `v3.0.10` `cargo-build-sbf` + platform-tools **v1.52** extracted to `~/.cache/solana/v1.52/platform-tools` and symlinked as `<agave>/bin/platform-tools-sdk/sbf/dependencies/platform-tools`. Run `cargo build-sbf --tools-version v1.52 --skip-tools-install`, then strip with the v1.52 `llvm-objcopy` (the SDK strip script tries to reinstall v1.51 and removes the symlink). Agave 2.x silently uses platform-tools v1.48 and fails.
 - Upstream tests also need `tests/fixtures/hostile_matcher` built and a sibling `../percolator-match` checkout (`60aac3a9…`) built; the README omits both.
 - `release.anza.xyz` is blocked by the container's network policy; GitHub release downloads work.
+- **All of the above is now scripted** (`scripts/setup-toolchain.sh`, `scripts/build-sbf.sh`, `scripts/build-upstream.sh`; see `docs/development.md`). `build-sbf.sh` pre-creates the SDK's v1.51 markers so the strip step never downloads v1.51 or unlinks v1.52. The repo's `rust-toolchain.toml` (1.94.1) also applies inside `vendor/`; never run two rustup installs at once (they race and fail with "detected conflict").
 
 ## 6. Document map
 
 | Need | File |
 | --- | --- |
+| Local setup, build, test, troubleshooting | `docs/development.md` |
 | Required behavior | `docs/spec.md` |
 | Phases, verification, order | `docs/execution-plan.md` |
 | Pins, test results, route allowlist, avoided-route needs | `docs/architecture/p1-upstream-reproduction.md` |
@@ -60,7 +63,7 @@ A Solana perpetuals DEX for freshly launched tokens that have a graduated DEX po
 | Maintained fork explainer | `docs/architecture/fork-strategy.md` |
 | Product feature ideas | `docs/research/feature-ideas.md` |
 | Owner curriculum and progress | `docs/research/learning-curriculum.md`, `docs/research/learning-progress.md` |
-| Issue backlog to create after merge | `docs/roadmap/issue-backlog.md` |
+| Issue backlog (created as #2–#35) | `docs/roadmap/issue-backlog.md` |
 
 ## 7. Open questions
 
@@ -72,4 +75,5 @@ A Solana perpetuals DEX for freshly launched tokens that have a graduated DEX po
 ## 8. Session log
 
 - **2026-09-30** (Claude Code on the web): analyzed docs; reproduced upstream builds and tests at `2b1d025` and `5cb331dd`; researched the upstream finding ledger, Surfpool, DEX pool layouts and oracle performance; recorded owner decisions 1–10; wrote the phased plan, architecture notes, feature ideas and curriculum; opened the planning PR. Competitor-specific analysis was removed from the public repo at the owner's request and the PR history was squashed. Named competitor and adjacent-project details (including the older thesis and validation-review benchmarks) now live in the private `moka-trade-labs/strategy` repo; public docs keep neutral category descriptions.
-- **Next session starts here:** after PR #1 is merged, (1) create milestones, labels and issues from `docs/roadmap/issue-backlog.md`; (2) begin Phase 1 (repo tooling and CI) per `docs/execution-plan.md`. Use the build recipe in §5.
+- **2026-09-30, session 2** (Claude Code on the web): PR #1 merged. Created issues #2–#35 from the backlog (labels only, no milestones). Implemented Phase 1 (#2–#7): toolchain and upstream build scripts with a committed hash manifest, a strict-lint Cargo workspace, CI, templates, the SessionStart hook and `docs/development.md`. Reproduced all pinned hashes from a clean build. Found that upstream's own LiteSVM harness (`vendor/percolator-prog/tests/support/v16_svm.rs`, 6.2k lines, `litesvm 0.1` + `solana-sdk 1.18`) already drives every Phase 2 flow.
+- **Next session starts here:** (1) get Phase 1 merged with CI green; the owner creates the milestones/board. (2) Phase 2 (#9 first). Decide the harness approach: **recommended**, `moka-tests` takes `percolator-prog` as a **git** dependency at `WRAPPER_COMMIT` (`default-features = false`, `no-entrypoint`; not a `vendor/` path, so `cargo test` still works without `vendor/`) for instruction encoders and state decoders (the ABI source of truth), uses `litesvm 0.1`/`solana-sdk 1.18` to match upstream, and keeps a thin harness of our own that follows `v16_svm.rs` rather than including it. Load programs only via `moka_tests::load_pinned_program`.
