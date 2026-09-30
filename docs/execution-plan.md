@@ -25,8 +25,9 @@ Rules for every phase:
 - **Delivered:** upstream pin (wrapper `5cb331dd` + engine `4db11a8c`); reproduction recipe and results; instruction matrix; SEC-10 route allowlist mapped to upstream open findings; owner decisions; oracle design.
 - **Verify:** read `architecture/p1-upstream-reproduction.md` §1–§5 and `HANDOFF.md`.
 
-### Phase 1 — Repo tooling and CI (small)
+### Phase 1 — Repo tooling and CI (small) — 🟡 delivered on branch, CI pending (2026-09-30)
 
+- **Status:** all deliverables exist (issues #2–#7); a clean cloud build reproduced every pinned hash. Done when CI is green on `main`. How to run it: [development.md](development.md).
 - **Goal:** anyone can build and test the pinned upstream with one command.
 - **Deliverables:** `scripts/setup-toolchain.sh` (Agave 3.0.10 + platform-tools v1.52, including the strip workaround); `scripts/build-upstream.sh` (clones pins into `vendor/`, builds wrapper and fixtures, checks sha256); a Rust workspace skeleton (`crates/`, `tests/`); a GitHub Actions workflow running `cargo fmt`, `clippy` and tests; a SessionStart hook for Claude Code on the web.
 - **Verify:** on a fresh machine, `scripts/setup-toolchain.sh && scripts/build-upstream.sh` prints hashes matching the P1 record; the CI badge is green.

@@ -52,10 +52,19 @@ Environment: Linux x86_64 container, 4 vCPU, host `rustc 1.94.1`.
 ### Toolchain notes (reproducibility)
 
 - Agave `v2.3.13` `cargo-build-sbf` silently fell back to platform-tools **v1.48** (cargo 1.84). That fails on the `wincode 0.5.3` dependency (`edition2024`). **Do not use Agave 2.x for this wrapper.**
-- Agave `v3.0.10` `cargo-build-sbf` queries the GitHub API to validate `--tools-version`. This panics when the API is unreachable, so offline or proxied environments must pre-install tools.
+- Agave `v3.0.10` `cargo-build-sbf` queries the GitHub API to validate `--tools-version` and panics when it is unreachable, **unless** `--skip-tools-install` is passed with the tools pre-installed. Re-checked 2026-09-30: `scripts/build-sbf.sh` builds with all network access broken and produces identical hashes, so CI has no GitHub API or rate-limit dependency.
 - Working recipe: extract `platform-tools v1.52` (`platform-tools-linux-x86_64.tar.bz2` from `anza-xyz/platform-tools` releases) to `~/.cache/solana/v1.52/platform-tools`, symlink it as `<agave>/bin/platform-tools-sdk/sbf/dependencies/platform-tools`, and run `cargo build-sbf --tools-version v1.52 --skip-tools-install`. The SDK's `strip.sh`/`env.sh` then tries to install v1.51 and removes the symlink, so strip with `~/.cache/solana/v1.52/platform-tools/llvm/bin/llvm-objcopy --strip-all target/sbpf-solana-solana/release/<name>.so target/deploy/<name>.so`.
 - The `--release` flag on host tests is a speed deviation from upstream's documented debug `cargo test --all-targets`.
-- P1 exit still requires a pinned, scripted, reproducible build: a container image or verified-build flow, rather than this manual recipe.
+- **Scripted (2026-09-30):** `scripts/setup-toolchain.sh` + `scripts/build-upstream.sh` implement this recipe. Instead of stripping by hand, `scripts/build-sbf.sh` pre-creates the SDK's `platform-tools-v1.51.md`/criterion markers so `install.sh` skips its v1.51 download and the SDK strips with the linked v1.52 tools. A clean build in a fresh cloud container (different checkout path from the original run) reproduced all four hashes below with `--locked`, so the build is path-independent. The committed manifest is `scripts/upstream-hashes.sha256`:
+
+  | Artifact | Bytes | sha256 |
+  | --- | --- | --- |
+  | `percolator_prog.so` @ `5cb331dd` | 1,272,152 | `558778ee9b0d02ca95d9c1f430e5b0e786d1a27a02484301dd60d6489a87546c` |
+  | `auth_matcher.so` | 29,216 | `50e532267926e180f013200c1799e26127dd23dc150866cffd491424629ddf93` |
+  | `hostile_matcher.so` | 84,472 | `e0c20fad34a7822cc6ce42a3c77ff08a8591977102f0c497a339d66a9dd6240a` |
+  | `percolator_match.so` @ `60aac3a9` | 47,064 | `15ca5d638e7911157ef075b60170c06d82ef2208f6565002cf6620315e6dc3ea` |
+
+- A container image or verified-build (`solana-verify`) flow is still needed before any deployment manifest (Phase 8).
 
 ### 2.1 Wrapper test results
 

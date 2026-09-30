@@ -1,0 +1,38 @@
+name: Deliverable
+description: One deliverable of a phase in docs/execution-plan.md
+labels: []
+body:
+  - type: input
+    id: phase
+    attributes:
+      label: Phase / milestone
+      placeholder: "Phase 2 — Localnet vertical slice"
+    validations:
+      required: true
+  - type: textarea
+    id: goal
+    attributes:
+      label: Goal
+    validations:
+      required: true
+  - type: input
+    id: spec
+    attributes:
+      label: Spec IDs
+      placeholder: "EXE-02, CAP-13"
+  - type: textarea
+    id: acceptance
+    attributes:
+      label: Acceptance checklist
+      value: "- [ ] "
+    validations:
+      required: true
+  - type: input
+    id: curriculum
+    attributes:
+      label: Curriculum modules
+      placeholder: "S2, T1"
+  - type: textarea
+    id: links
+    attributes:
+      label: Links

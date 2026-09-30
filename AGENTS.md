@@ -34,6 +34,11 @@ If documents conflict, stop and resolve the specification rather than choosing a
 - Never place wallet keypairs, RPC secrets, auth tokens, private deployment material, or `.env` values in the repository.
 - Do not deploy or move real funds without explicit authorization and the mainnet gates in the specification.
 
+## Branches and PRs
+
+- Name branches after the work: `phase-<N>/<issue>-<short-slug>`, e.g. `phase-2/10-portfolio-lifecycle`; docs-only work uses `docs/<slug>`. Cloud sessions with a pre-assigned branch name use it and say so in the PR description.
+- One issue per PR, reviewed by the owner before the next issue starts (owner decision 13).
+
 ## Session continuity and learning
 
 - Read `docs/HANDOFF.md` at the start of every session and update it before ending a session that changed decisions or state.
