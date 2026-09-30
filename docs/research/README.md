@@ -1,9 +1,4 @@
-# Research archive
+# Research
 
-These files are background evidence, not current requirements:
-
-- `adl-vs-percolator.md` — ADL and Percolator risk-model comparison.
-- `perp-futures-literature-review.md` — broader perpetual-futures literature review.
-
-`../spec.md` is authoritative. Rejected or superseded implementation proposals were intentionally left in the ideation repository to prevent stale architecture from entering agent context.
-
+- **Current and maintained:** `feature-ideas.md` (product feature ideas), `learning-curriculum.md` and `learning-progress.md` (owner learning track).
+- **Historical background:** `adl-vs-percolator.md` and `perp-futures-literature-review.md`. These are context only and never override `docs/spec.md`.

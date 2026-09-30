@@ -3,7 +3,8 @@
 - **Updated:** 2026-09-12
 - **Status:** Executable protocol thesis for a one-market devnet build; not an audit or mainnet approval.
 - **Chain:** Solana
-- **Risk engine:** candidate pins are Percolator engine `8eb7142aada316f6c476f5c4fa815d3a806706d5` and wrapper `2b1d025c004f92d3f89bac00113be90a0cbbcf63`; both must pass the compatibility gate before becoming release pins.
+- **Risk engine:** current MVP pin is wrapper `5cb331dde354517c6371a8acf92cecb194f3bb73` with declared engine `4db11a8cb0053815e23a35d3a7d3edc265d8d866` (see `architecture/p1-upstream-reproduction.md`). The analysis below references the earlier `8eb7142`/`2b1d025` candidates; the cited functions exist at both.
+- **Superseded in part (2026-09-30):** MVP scope, oracle, isolation and LP-yield decisions now live in `spec.md` and `execution-plan.md`; where this thesis differs, those documents win.
 - **Benchmark:** Authenticated Colosseum Copilot project, winner, accelerator, and archive research, supplemented by current primary sources. Findings are bounded by the searches described below.
 
 > A Solana perpetuals exchange for underserved, spot-liquid tokens: each eligible market has its own funded maker pool, explicit loss-bearing backstop, and exposure limits tied to what it can safely underwrite.
