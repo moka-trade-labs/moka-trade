@@ -33,10 +33,13 @@ fi
 # install <url> <sha256> <dest-dir>: download, verify, unpack into a temp dir
 # and move into place, so an interrupted run never leaves a half-installed
 # tree that later runs would mistake for a complete one.
+# Temp dirs are removed on any exit, including curl/tar failures under set -e.
+CLEANUP=()
+trap 'rm -rf "${CLEANUP[@]}"' EXIT
 install() {
   local url="$1" sha="$2" dest="$3" tmp
   tmp="$(mktemp -d "$(dirname "$dest")/.install.XXXXXX")"
-  trap 'rm -rf "$tmp"' RETURN
+  CLEANUP+=("$tmp")
   curl --fail --location --silent --show-error --retry 4 --retry-delay 2 -o "$tmp/pkg.tar.bz2" "$url"
   if ! echo "$sha  $tmp/pkg.tar.bz2" | sha256sum -c --quiet -; then
     log "sha256 mismatch for $url (expected $sha); refusing to install"

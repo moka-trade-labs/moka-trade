@@ -19,6 +19,8 @@ use solana_sdk::{
     transaction::Transaction,
 };
 use spl_token::state::{Account as TokenAccount, AccountState, Mint};
+use std::collections::BTreeMap;
+use std::fmt::Write as _;
 
 /// Compute-unit limit requested for every transaction (Solana maximum).
 pub const TX_CU_LIMIT: u32 = 1_400_000;
@@ -92,6 +94,9 @@ pub struct Harness {
     pub matcher_program: Pubkey,
     pub usdc_mint: Pubkey,
     payer: Keypair,
+    /// Every USDC token account the harness created, by display name. The
+    /// mint supply always equals the sum of these balances (CAP-13).
+    token_accounts: BTreeMap<Pubkey, String>,
     seed: [u8; 32],
     next_label: u8,
     tx_sequence: u64,
@@ -111,6 +116,7 @@ impl Harness {
             matcher_program: Pubkey::default(),
             usdc_mint: Pubkey::default(),
             payer: keypair(&seed, 0),
+            token_accounts: BTreeMap::new(),
             seed,
             next_label: 1,
             tx_sequence: 0,
@@ -150,7 +156,8 @@ impl Harness {
         let vault_authority =
             Pubkey::find_program_address(&[b"vault", market.as_ref()], &self.program_id).0;
         let vault = spl_associated_token_account_address(&vault_authority, &self.usdc_mint);
-        self.set_token_account(vault, self.usdc_mint, vault_authority, 0)?;
+        let name = format!("vault[{}]", short(&market));
+        self.set_token_account(&name, vault, vault_authority, 0)?;
 
         self.send_init_market(market, &admin, profile)?;
         Ok(MarketGroup {
@@ -287,19 +294,25 @@ impl Harness {
         self.set(key, spl_token::ID, data)
     }
 
-    /// Creates a token account holding `amount` and raises the mint supply
-    /// by the same amount, so supply always equals the sum of balances.
+    /// Creates (or overwrites) a USDC token account holding `amount` and
+    /// moves the mint supply by the balance change, so supply always equals
+    /// the sum of tracked balances. `name` labels it in reconciliation traces.
     pub fn set_token_account(
         &mut self,
+        name: &str,
         key: Pubkey,
-        mint: Pubkey,
         owner: Pubkey,
         amount: u64,
     ) -> Result<(), String> {
+        let previous = if self.token_accounts.contains_key(&key) {
+            self.token_balance(&key)?
+        } else {
+            0
+        };
         let mut data = vec![0u8; TokenAccount::LEN];
         TokenAccount::pack(
             TokenAccount {
-                mint,
+                mint: self.usdc_mint,
                 owner,
                 amount,
                 delegate: COption::None,
@@ -312,18 +325,96 @@ impl Harness {
         )
         .map_err(|e| format!("pack token account: {e:?}"))?;
         self.set(key, spl_token::ID, data)?;
+        self.token_accounts.insert(key, name.to_owned());
 
+        let mint = self.usdc_mint;
         let mut mint_account = self.account(&mint)?;
         let mut mint_state =
             Mint::unpack(&mint_account.data).map_err(|e| format!("unpack mint: {e:?}"))?;
         mint_state.supply = mint_state
             .supply
-            .checked_add(amount)
-            .ok_or("mint supply overflow")?;
+            .checked_sub(previous)
+            .and_then(|s| s.checked_add(amount))
+            .ok_or("mint supply out of range")?;
         Mint::pack(mint_state, &mut mint_account.data).map_err(|e| format!("pack mint: {e:?}"))?;
         self.svm
             .set_account(mint, mint_account)
             .map_err(|e| format!("set mint: {e:?}"))
+    }
+
+    /// Balances and engine ledger totals at one point in a scenario.
+    pub fn snapshot(&self, label: &str, groups: &[&MarketGroup]) -> Result<Snapshot, String> {
+        let mut tokens = BTreeMap::new();
+        for (key, name) in &self.token_accounts {
+            tokens.insert(name.clone(), self.token_balance(key)?);
+        }
+        let mint = Mint::unpack(&self.account(&self.usdc_mint)?.data)
+            .map_err(|e| format!("unpack mint: {e:?}"))?;
+        let mut ledgers = BTreeMap::new();
+        for group in groups {
+            let (_, engine) = self.market_state(group)?;
+            ledgers.insert(
+                format!("market[{}]", short(&group.market)),
+                Ledger {
+                    vault: engine.vault,
+                    insurance: engine.insurance,
+                    capital: engine.c_tot,
+                    backing_earnings: engine.backing_provider_earnings_total,
+                },
+            );
+        }
+        Ok(Snapshot {
+            label: label.to_owned(),
+            tokens,
+            mint_supply: mint.supply,
+            ledgers,
+        })
+    }
+
+    /// CAP-13 reconciliation, run after every step of a scenario:
+    /// 1. conservation: tracked token balances sum to the mint supply;
+    /// 2. custody: each group's SPL vault balance equals the engine `vault`
+    ///    ledger (upstream's own census rule);
+    /// 3. solvency: capital + insurance + backing earnings never exceed the
+    ///    vault (a subset of upstream's explicit stocks, so a weaker but
+    ///    sound bound).
+    pub fn reconcile(&self, groups: &[&MarketGroup]) -> Result<(), String> {
+        let mut sum: u128 = 0;
+        for key in self.token_accounts.keys() {
+            sum = sum
+                .checked_add(u128::from(self.token_balance(key)?))
+                .ok_or("token sum overflow")?;
+        }
+        let supply = Mint::unpack(&self.account(&self.usdc_mint)?.data)
+            .map_err(|e| format!("unpack mint: {e:?}"))?
+            .supply;
+        if sum != u128::from(supply) {
+            return Err(format!(
+                "conservation: balances sum {sum} != supply {supply}"
+            ));
+        }
+        for group in groups {
+            let (_, engine) = self.market_state(group)?;
+            let spl_vault = u128::from(self.token_balance(&group.vault)?);
+            if engine.vault != spl_vault {
+                return Err(format!(
+                    "custody: market {} engine vault {} != SPL vault {spl_vault}",
+                    group.market, engine.vault
+                ));
+            }
+            let claims = engine
+                .c_tot
+                .checked_add(engine.insurance)
+                .and_then(|x| x.checked_add(engine.backing_provider_earnings_total))
+                .ok_or("claims overflow")?;
+            if claims > engine.vault {
+                return Err(format!(
+                    "solvency: market {} claims {claims} > vault {}",
+                    group.market, engine.vault
+                ));
+            }
+        }
+        Ok(())
     }
 
     fn set(&mut self, key: Pubkey, owner: Pubkey, data: Vec<u8>) -> Result<(), String> {
@@ -340,6 +431,61 @@ impl Harness {
             )
             .map_err(|e| format!("set account {key}: {e:?}"))
     }
+}
+
+/// Engine ledger totals for one market group, in USDC atoms.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Ledger {
+    pub vault: u128,
+    pub insurance: u128,
+    pub capital: u128,
+    pub backing_earnings: u128,
+}
+
+#[derive(Clone, Debug)]
+pub struct Snapshot {
+    pub label: String,
+    pub tokens: BTreeMap<String, u64>,
+    pub mint_supply: u64,
+    pub ledgers: BTreeMap<String, Ledger>,
+}
+
+impl Snapshot {
+    /// Human-readable before/after trace of every value that changed.
+    pub fn trace(&self, after: &Snapshot) -> String {
+        let mut out = format!("[{} -> {}]\n", self.label, after.label);
+        let mut changed = false;
+        for (name, &new) in &after.tokens {
+            let old = self.tokens.get(name).copied().unwrap_or_default();
+            if old != new {
+                changed = true;
+                let _ = writeln!(out, "  token  {name:<24} {old} -> {new}");
+            }
+        }
+        for (name, new) in &after.ledgers {
+            let old = self.ledgers.get(name).copied();
+            if old != Some(*new) {
+                changed = true;
+                let _ = writeln!(out, "  ledger {name:<24} {old:?} -> {new:?}");
+            }
+        }
+        if self.mint_supply != after.mint_supply {
+            changed = true;
+            let _ = writeln!(
+                out,
+                "  supply {} -> {}",
+                self.mint_supply, after.mint_supply
+            );
+        }
+        if !changed {
+            out.push_str("  (no balance or ledger changes)\n");
+        }
+        out
+    }
+}
+
+fn short(key: &Pubkey) -> String {
+    key.to_string().chars().take(6).collect()
 }
 
 fn keypair(seed: &[u8; 32], label: u8) -> Keypair {

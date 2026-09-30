@@ -20,10 +20,10 @@ jobs:
     name: fmt, clippy, tests
     runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@v4
-      # rust-toolchain.toml pins the host toolchain; rustup installs it on first use.
-      - run: rustup show active-toolchain
-      - uses: Swatinem/rust-cache@v2
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      # Installs the host toolchain pinned in rust-toolchain.toml.
+      - run: rustup toolchain install
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
       - run: cargo fmt --all --check
       - run: cargo clippy --workspace --all-targets --locked -- -D warnings
       - run: cargo test --workspace --locked
@@ -32,27 +32,41 @@ jobs:
     name: pinned upstream build (TEST-08)
     runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - run: rustup toolchain install
       - name: Cache SBF toolchain
-        uses: actions/cache@v4
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
         with:
           path: |
             ~/.cache/moka-toolchain
             ~/.cache/solana
           key: sbf-toolchain-${{ hashFiles('scripts/pins.env', 'scripts/setup-toolchain.sh') }}
       - name: Cache cargo registry and git deps
-        uses: actions/cache@v4
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
         with:
           path: |
             ~/.cargo/registry
             ~/.cargo/git
           key: upstream-cargo-${{ hashFiles('scripts/pins.env') }}
+      # Incremental upstream builds; the sha256 check still runs on every build.
+      - name: Cache upstream target dirs
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
+        with:
+          path: |
+            vendor/percolator-prog/target
+            vendor/percolator-prog/tests/fixtures/auth_matcher/target
+            vendor/percolator-prog/tests/fixtures/hostile_matcher/target
+            vendor/percolator-match/target
+          key: upstream-target-${{ hashFiles('scripts/pins.env', 'scripts/build-sbf.sh') }}
       - run: scripts/setup-toolchain.sh
       - run: scripts/build-upstream.sh
-      - uses: Swatinem/rust-cache@v2
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
       - name: LiteSVM tests against the verified artifacts (moka-tests)
+        # Missing artifacts fail here instead of skipping.
+        env:
+          MOKA_REQUIRE_ARTIFACTS: "1"
         run: cargo test -p moka-tests --locked
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: upstream-sbf
           path: |
@@ -63,9 +77,9 @@ jobs:
     name: scripts and secrets
     runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
       - run: shellcheck scripts/*.sh
       - name: No keypairs or env files committed
         run: |
-          bad="$(git ls-files | grep -E '(^|/)\.env($|\.)|keypair.*\.json$|(^|/)id\.json$' | grep -v '\.env\.example$' || true)"
+          bad="$(git ls-files | grep -Ei '(^|/)\.env($|\.)|keypair.*\.json$|(^|/)(id|wallet)\.json$|\.(pem|key|p12)$|(^|/)\.npmrc$' | grep -v '\.env\.example$' || true)"
           if [ -n "$bad" ]; then echo "Committed secret-like files:"; echo "$bad"; exit 1; fi

@@ -20,7 +20,7 @@ You do **not** need the Solana CLI installed separately; `setup-toolchain.sh` fe
 git clone https://github.com/moka-trade-labs/moka-trade.git
 cd moka-trade
 
-# 1. SBF toolchain: Agave v3.0.10 + platform-tools v1.52 (~2 min, once).
+# 1. SBF toolchain: Agave v3.0.10 + platform-tools v1.52, sha256-verified (~2 min, once).
 scripts/setup-toolchain.sh
 export PATH="$(scripts/setup-toolchain.sh --print-bin):$PATH"   # add to your shell rc
 
@@ -51,7 +51,7 @@ cargo clippy --workspace --all-targets -- -D warnings
 cargo test --workspace
 ```
 
-`cargo test` works without the SBF toolchain: tests that need `vendor/artifacts` skip with a note. After `build-upstream.sh` they also verify every loaded binary against the pin manifest (`tests/tests/pins.rs`).
+`cargo test` works without the SBF toolchain: tests that need `vendor/artifacts` skip with a note. CI sets `MOKA_REQUIRE_ARTIFACTS=1` so a missing artifact fails instead of skipping. After `build-upstream.sh` they also verify every loaded binary against the pin manifest (`tests/tests/pins.rs`).
 
 Other useful commands:
 
@@ -68,7 +68,7 @@ Other useful commands:
 | --- | --- |
 | `crates/moka-types` | Pins (`pins.rs`) and fixed-point units (`units.rs`). `no_std`, no Solana dependency |
 | `crates/moka-math` | Checked `mul_div`/bps helpers with explicit rounding (CAP-07) |
-| `tests/` (`moka-tests`) | Integration tests. `src/svm.rs` is the LiteSVM harness (`Harness::new`, `init_market_group`, `send_wrapper`); `load_pinned_program(name)` is the only way to load an upstream `.so`. Wrapper instructions are encoded by the pinned `percolator-prog` crate (git dependency at `WRAPPER_COMMIT`) |
+| `tests/` (`moka-tests`) | Integration tests. `src/svm.rs` is the LiteSVM harness (`Harness::new`, `init_market_group`, `send_wrapper`, and CAP-13 `snapshot`/`trace`/`reconcile`); `load_pinned_program(name)` is the only way to load an upstream `.so`. Wrapper instructions are encoded by the pinned `percolator-prog` crate (git dependency at `WRAPPER_COMMIT`) |
 | `programs/*` | Empty until Phases 3–5 |
 | `scripts/` | Toolchain, upstream build, SessionStart hook |
 
@@ -91,7 +91,10 @@ fn cap_13_deposit_reconciles() {
     require_artifacts!();                        // skip when vendor/artifacts is missing
     let mut h = Harness::new([1; 32]).unwrap();   // pinned wrapper + auth_matcher, USDC mint
     let group = h.init_market_group(MarketProfile::default()).unwrap();
-    // h.send_wrapper(WrapperIx::..., accounts, &[&signer]) for each step
+    let before = h.snapshot("start", &[&group]).unwrap();
+    // h.send_wrapper(WrapperIx::..., accounts, &[&signer]) for each step, then:
+    h.reconcile(&[&group]).unwrap();              // conservation, custody, solvency
+    println!("{}", before.trace(&h.snapshot("step", &[&group]).unwrap()));
 }
 ```
 
@@ -106,7 +109,9 @@ Follow `execution-plan.md` §5. Mechanically: edit `scripts/pins.env` and `crate
 | Symptom | Cause and fix |
 | --- | --- |
 | `sha256sum: WARNING: 1 computed checksum did NOT match` | Different toolchain, dirty `vendor/` checkout, or a changed pin. Run `git -C vendor/<repo> status`, re-run `setup-toolchain.sh`, then `build-upstream.sh`. Never re-record hashes to make this pass without a pin bump |
-| `cargo-build-sbf` panics validating `--tools-version` | It could not reach the GitHub API. Our scripts pass `--skip-tools-install` with pre-installed tools; check `scripts/build-sbf.sh --link-only` ran |
+| `sha256 mismatch ... refusing to install` from `setup-toolchain.sh` | The downloaded Agave or platform-tools tarball does not match `scripts/pins.env`. Do not edit the hash to make it pass; retry the download, and treat a repeat mismatch as a possible supply-chain problem |
+| `MOKA_REQUIRE_ARTIFACTS is set but ... has no percolator_prog.so` | CI mode: artifact-dependent tests fail instead of skipping. Run `scripts/build-upstream.sh`, or unset the variable locally |
+| `cargo-build-sbf` panics validating `--tools-version` | You ran `cargo build-sbf` directly without `--skip-tools-install`, so it tried the GitHub API. Use `scripts/build-sbf.sh`, which works offline |
 | Build downloads platform-tools v1.51 | The SDK's `install.sh` markers are missing. `scripts/build-sbf.sh --link-only` recreates them |
 | `edition2024` errors | Agave 2.x (platform-tools v1.48) is on `PATH` first. Put `$(scripts/setup-toolchain.sh --print-bin)` first |
 | rustup "detected conflict" installing components | Two rustup installs raced (e.g. an editor and a terminal). Re-run `rustup toolchain install` alone |

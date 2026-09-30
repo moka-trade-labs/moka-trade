@@ -8,7 +8,6 @@ use solana_sdk::signature::Signer;
 macro_rules! require_artifacts {
     () => {
         if !artifacts_available() {
-            eprintln!("skipped: run scripts/build-upstream.sh first");
             return;
         }
     };
@@ -37,18 +36,20 @@ fn test_02_init_market_creates_single_asset_group() {
     assert_eq!(h.token_balance(&group.vault).expect("vault"), 0);
 }
 
+/// Program-state check only: each `InitMarket` records its own group id and
+/// authority. The balance-level isolation test (a loss in A leaves B
+/// unchanged) is issue #14.
 #[test]
-fn sec_09_each_token_gets_its_own_market_and_vault() {
+fn sec_09_market_groups_have_distinct_ids_and_authorities() {
     require_artifacts!();
     let mut h = Harness::new([8; 32]).expect("harness");
     let a = h.init_market_group(MarketProfile::default()).expect("A");
     let b = h.init_market_group(MarketProfile::default()).expect("B");
-    assert_ne!(a.market, b.market);
-    assert_ne!(a.vault_authority, b.vault_authority);
-    assert_ne!(a.vault, b.vault);
-    let (_, ea) = h.market_state(&a).expect("A state");
-    let (_, eb) = h.market_state(&b).expect("B state");
+    let (ca, ea) = h.market_state(&a).expect("A state");
+    let (cb, eb) = h.market_state(&b).expect("B state");
     assert_ne!(ea.market_group_id, eb.market_group_id);
+    assert_eq!(ca.marketauth, a.admin.pubkey().to_bytes());
+    assert_eq!(cb.marketauth, b.admin.pubkey().to_bytes());
 }
 
 #[test]
@@ -67,4 +68,37 @@ fn test_02_init_market_is_one_shot() {
         err.starts_with("InstructionError(3, Custom(2))"),
         "unexpected error: {err}"
     );
+}
+
+/// CAP-13: InitMarket moves no tokens, and every reconciliation rule holds
+/// for a fresh group. Run with `--nocapture` to see the trace.
+#[test]
+fn cap_13_reconciles_across_init_market() {
+    require_artifacts!();
+    let mut h = Harness::new([10; 32]).expect("harness");
+    let before = h.snapshot("start", &[]).expect("snapshot");
+    let group = h
+        .init_market_group(MarketProfile::default())
+        .expect("InitMarket");
+    h.reconcile(&[&group]).expect("reconcile");
+    let after = h.snapshot("InitMarket", &[&group]).expect("snapshot");
+    println!("{}", before.trace(&after));
+    assert_eq!(after.mint_supply, 0);
+    assert!(after.tokens.values().all(|&b| b == 0));
+}
+
+/// CAP-13: the custody rule is not vacuous. Tokens that reach the vault
+/// without going through the program (a donation) must fail reconciliation.
+#[test]
+fn cap_13_reconcile_detects_vault_drift() {
+    require_artifacts!();
+    let mut h = Harness::new([11; 32]).expect("harness");
+    let group = h
+        .init_market_group(MarketProfile::default())
+        .expect("InitMarket");
+    let name = "vault (donated)";
+    h.set_token_account(name, group.vault, group.vault_authority, 5)
+        .expect("donate");
+    let err = h.reconcile(&[&group]).expect_err("drift not detected");
+    assert!(err.starts_with("custody:"), "{err}");
 }

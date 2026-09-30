@@ -37,7 +37,7 @@ pub fn mul_div(a: u64, b: u64, d: u64, rounding: Rounding) -> Result<u64, MathEr
 
 /// Applies a basis-point fee to `amount`.
 pub fn bps_of(amount: u64, bps: u64, rounding: Rounding) -> Result<u64, MathError> {
-    mul_div(amount, bps, 10_000, rounding)
+    mul_div(amount, bps, moka_types::units::BPS_DENOMINATOR, rounding)
 }
 
 #[cfg(test)]

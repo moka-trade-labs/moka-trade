@@ -2,13 +2,6 @@
 //! `scripts/build-upstream.sh` writes to `vendor/artifacts/`, plus the LiteSVM
 //! harness in [`svm`].
 
-/// True when `scripts/build-upstream.sh` has produced the program binaries.
-/// Tests that need them return early (with a note) when this is false, so
-/// `cargo test` still works on machines without the SBF toolchain.
-pub fn artifacts_available() -> bool {
-    artifacts_dir().join("percolator_prog.so").exists()
-}
-
 pub mod svm;
 
 use sha2::{Digest, Sha256};
@@ -26,6 +19,25 @@ pub fn repo_root() -> PathBuf {
 
 pub fn artifacts_dir() -> PathBuf {
     repo_root().join("vendor").join("artifacts")
+}
+
+/// Whether a test that needs the upstream binaries should run.
+///
+/// Returns false (and prints a note) when `scripts/build-upstream.sh` has not
+/// run, so `cargo test` works without the SBF toolchain. With
+/// `MOKA_REQUIRE_ARTIFACTS=1` (set in CI) a missing binary panics instead,
+/// so a broken artifact path can never turn into a vacuous pass.
+pub fn artifacts_available() -> bool {
+    if artifacts_dir().join("percolator_prog.so").exists() {
+        return true;
+    }
+    assert!(
+        std::env::var_os("MOKA_REQUIRE_ARTIFACTS").is_none(),
+        "MOKA_REQUIRE_ARTIFACTS is set but {} has no percolator_prog.so",
+        artifacts_dir().display()
+    );
+    eprintln!("skipped: vendor/artifacts missing; run scripts/build-upstream.sh");
+    false
 }
 
 /// Parses `scripts/upstream-hashes.sha256` (`sha256sum` format) into

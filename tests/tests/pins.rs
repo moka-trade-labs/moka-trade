@@ -1,6 +1,6 @@
 //! Spec EXE-01 / TEST-08: the pins in code, scripts and the pin manifest agree.
 
-use moka_tests::{artifacts_dir, load_pinned_program, pinned_hashes, repo_root};
+use moka_tests::{artifacts_available, load_pinned_program, pinned_hashes, repo_root};
 use moka_types::pins;
 use std::fs;
 
@@ -58,8 +58,7 @@ fn test_08_manifest_lists_every_program() {
 /// so `cargo test` works on machines without the SBF toolchain.
 #[test]
 fn test_08_built_artifacts_match_pins() {
-    if !artifacts_dir().exists() {
-        eprintln!("skipped: vendor/artifacts missing; run scripts/build-upstream.sh");
+    if !artifacts_available() {
         return;
     }
     for name in pinned_hashes().expect("pin manifest").keys() {
