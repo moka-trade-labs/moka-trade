@@ -3,8 +3,9 @@
 - **Updated:** 2026-09-12
 - **Status:** Executable protocol thesis for a one-market devnet build; not an audit or mainnet approval.
 - **Chain:** Solana
-- **Risk engine:** candidate pins are Percolator engine `8eb7142aada316f6c476f5c4fa815d3a806706d5` and wrapper `2b1d025c004f92d3f89bac00113be90a0cbbcf63`; both must pass the compatibility gate before becoming release pins.
-- **Benchmark:** Authenticated Colosseum Copilot project, winner, accelerator, and archive research, supplemented by current primary sources. Findings are bounded by the searches described below.
+- **Risk engine:** current MVP pin is wrapper `5cb331dde354517c6371a8acf92cecb194f3bb73` with declared engine `4db11a8cb0053815e23a35d3a7d3edc265d8d866` (see `architecture/p1-upstream-reproduction.md`). The analysis below references the earlier `8eb7142`/`2b1d025` candidates; the cited functions exist at both.
+- **Superseded in part (2026-09-30):** MVP scope, oracle, isolation and LP-yield decisions now live in `spec.md` and `execution-plan.md`; where this thesis differs, those documents win.
+- **Benchmark:** hackathon-corpus project and archive research, supplemented by current primary sources. Findings are bounded by the searches described below.
 
 > A Solana perpetuals exchange for underserved, spot-liquid tokens: each eligible market has its own funded maker pool, explicit loss-bearing backstop, and exposure limits tied to what it can safely underwrite.
 
@@ -97,13 +98,15 @@ The interface should show dollars available for the commitment period, remaining
 
 ### September 11 update: direct product overlap
 
-- **derp.trade:** current documentation describes a Solana mainnet beta using an AMM for long-tail derivatives and separately discloses that realizable PnL can be limited by pool liquidity. This is direct segment and payout-risk overlap, not merely a historical hackathon match. [Overview](https://docs.derp.trade/), [position-value rules](https://docs.derp.trade/docs/protocol/value).
-- **Perk:** its versioned documentation describes permissionless markets, a vAMM and a Percolator-derived risk engine. Its published security reviews are explicitly internal, not independent audits. Treat implementation and adoption claims as unverified here. [Introduction](https://docs.perk.fund/introduction), [security](https://docs.perk.fund/security).
-- **Wasabi / Omnipair:** spot-backed leverage and isolated spot-margin pools are substitutes for users who want leverage on new tokens rather than synthetic perps specifically. They are different products; no claim of risk-free liquidation or drop-in Percolator compatibility is adopted. [Wasabi leverage model](https://docs.wasabi.xyz/_/overview/leverage-trade), [Omnipair overview](https://docs.omnipair.fi/).
+- **AMM-based long-tail derivatives:** at least one Solana venue already offers AMM-priced derivatives on long-tail assets and discloses that realizable PnL can be limited by pool liquidity. This is direct segment and payout-risk overlap.
+- **Percolator-derived permissionless perps:** other projects describe permissionless markets with a vAMM and a Percolator-derived risk engine, with security reviews that are internal rather than independent.
+- **Spot-backed leverage and isolated spot-margin pools:** substitutes for users who want leverage on new tokens rather than synthetic perps specifically. They are different products; no claim of risk-free liquidation or Percolator compatibility is adopted.
+
+Named sources for this section are kept in the private strategy repository.
 
 These are primary documentation findings, not independent volume, solvency or audit verification. The proposed differentiation is **measurable payout resilience at a sustainable underwriting cost**, not being the first pool, first permissionless listing venue, first Percolator app, or first dynamic rate curve. See the review for demand gaps and rejection tests.
 
-### September 12 protocol benchmark: Phoenix, Percolator Trade, ORDR and Velocity
+### September 12 protocol benchmark: Phoenix, Percolator-based venues, ORDR and Velocity
 
 These products change the implementation bar, but none is a dependency unless explicitly pinned in the specification.
 
@@ -111,11 +114,11 @@ These products change the implementation bar, but none is a dependency unless ex
 | --- | --- | --- | --- |
 | [Phoenix](https://docs.phoenix.trade/phoenix/matching-engine/matching-engine) | Its engine combines FIFO orders with risk-capped virtual spline liquidity; its liquidation ladder progressively cancels, partially liquidates, transfers to a backstop, then uses ADL last. | Sequence/expiry protection, side-specific risk capacity, progressive intervention and a future maker-adapter boundary. | A full FIFO book and Phoenix's multi-venue mark construction: our launch assets may have no independent perp venue, and a cold CLOB has no liquidity merely because orders are stored onchain. |
 | [Percolator program](https://github.com/aeyakovenko/percolator-prog/tree/2b1d025c004f92d3f89bac00113be90a0cbbcf63) | The current wrapper separates pure risk accounting from custody/oracle/matcher policy and exposes domain-scoped insurance and backing top-ups, expiry, authority epochs, monotonic intent IDs, and loss/recovery ledgers. | Pin/fork this boundary, keep upstream changes small, use `TradeCpi`, and build the controller as the configured backing authority. | Reimplementing Toly's risk math or tracking `main`. Upstream explicitly labels the code educational and unaudited, so reproduction, review and audit remain mandatory. |
-| [Percolator Trade](https://percolator.trade/) | It already markets permissionless long-tail Percolator markets, isolated risk and oracle-derived/vAMM liquidity. | Treat it as a direct competitor and validate market-admission quality plus payout resilience. | Claims that we are the first permissionless long-tail Percolator venue. Permissionless creation is not differentiation. |
+| Existing Percolator-based venues | Permissionless long-tail Percolator markets with isolated risk and oracle-derived or virtual (vAMM) liquidity already exist. | Validate market-admission quality plus payout resilience as the basis for any differentiation. | Claims that we are the first permissionless long-tail Percolator venue. Permissionless creation is not differentiation. |
 | [ORDR](https://ordr.trade/) | Its published architecture uses per-maker private orderbook accounts, reference-price offsets and JIT execution to reduce shared-account contention. | Reserve a versioned maker-adapter ABI and make future quote contexts isolated per maker. | An MVP CLOB and dependency on unpublished protocol code. The public CHA0S-LABS repository found in this review is a landing site, not the exchange program. |
 | [Velocity](https://docs.velocity.exchange/protocol/how-it-works/orderbook-and-keepers) | Onchain orders can be filled by permissionless keepers using maker, JIT and AMM sources; its wind-down flow makes reduce-only, expiry and settlement explicit. | Permissionless bots with onchain validation, staged wind-down and later trigger/TWAP order support. | Cross-margin plus lending in the same first release, and reliance on its archived public Drift-derived repository as current Velocity source. |
 
-Recent public Phoenix updates add [TWAP execution](https://x.com/PhoenixTrade/status/2097750106124513637), [new markets](https://x.com/PhoenixTrade/status/2097771106077737347), wallet distribution and [agent/CLI tooling](https://x.com/PhoenixTrade/status/2094526578537455919). The product lesson is that a meaningful perp is an integrated protocol, SDK, keeper/indexer and distribution surface—not only a risk formula. Social updates are directional evidence; protocol requirements come from code and documentation. [Phoenix X](https://x.com/PhoenixTrade), [Percolator Trade X](https://x.com/PercolatorTrade), [ORDR X](https://x.com/ordrtrade), [Velocity X](https://x.com/VelocityDEX).
+Recent public Phoenix updates add [TWAP execution](https://x.com/PhoenixTrade/status/2097750106124513637), [new markets](https://x.com/PhoenixTrade/status/2097771106077737347), wallet distribution and [agent/CLI tooling](https://x.com/PhoenixTrade/status/2094526578537455919). The product lesson is that a meaningful perp is an integrated protocol, SDK, keeper/indexer and distribution surface—not only a risk formula. Social updates are directional evidence; protocol requirements come from code and documentation. [Phoenix X](https://x.com/PhoenixTrade), [ORDR X](https://x.com/ordrtrade), [Velocity X](https://x.com/VelocityDEX).
 
 ### September 9 technical and historical benchmark
 
@@ -137,25 +140,19 @@ As of 2026-09-09, the reviewed primary sources establish meaningful overlap. The
 
 **Current assessment:** a useful protocol-design experiment with substantial existing primitives. Novelty of the rate curve is low; novelty and usefulness of the integrated capital policy remain unproven. The difficult work is LP economics, accounting, and execution reliability, not drawing the curve.
 
-### Colosseum Copilot: similar builder projects
+### Builder-corpus benchmark: similar hackathon projects
 
-These are historical submission records retrieved on 2026-09-09. Mechanism descriptions are project claims or corpus summaries, not independently verified production deployments. Hackathon dates come from the API's `hackathon.startDate`; prize and cohort labels come from returned metadata.
+A 2026-09-09 search of a hackathon project corpus found adjacent submissions covering each component of this idea on its own:
 
-- **[Perc-o-dex](https://colosseum.com/projects/explore/perc-o-dex)** — `perc-o-dex`; Cypherpunk, September 2025. Its submission describes a sharded perpetual exchange forked from aeyakovenko. **Overlap:** building a Solana perp on Percolator. **Our proposed difference:** funded, stress-triggered backing deployment with LP loss accounting. The inspected record does not establish that feature. Being a Percolator fork is already represented in the corpus.
+- a sharded perp exchange forked from Percolator;
+- AMM-based leveraged perps for low-liquidity tokens;
+- peer-to-peer permissionless perps for newly minted assets;
+- creator-seeded liquidity lent out to enable long/short leverage from launch (a prize winner);
+- dual-flow batch auctions to reduce maker adverse selection;
+- competing liquidity pools underwriting a defined loss for recurring premiums;
+- autonomous hedging that responds to funding and open-interest metrics.
 
-- **[derp.trade](https://colosseum.com/projects/explore/derp.trade)** — `derp.trade`; Breakout, April 2025. The search record describes AMM-based leveraged perps for low-liquidity tokens and synthetic assets. **Overlap:** the proposed asset segment and trading use case. **Our proposed difference:** participant-driven execution and an explicit backstop-capital policy. “Perps for illiquid tokens” is insufficient differentiation on its own.
-
-- **[Uranus DEX](https://colosseum.com/projects/explore/uranus-dex)** — `uranus-dex`; Cypherpunk, September 2025. Its submission proposes peer-to-peer permissionless prediction perps for assets from mint. **Overlap:** early-token access and peer-to-peer execution. **Our proposed difference:** Percolator domain backing and measured settlement outcomes. The submission does not establish identical contract payoffs, margin rules, or loss accounting, so treat it as a market-access reference rather than assume interchangeable products.
-
-- **[Squeeze](https://colosseum.com/projects/explore/squeeze)** — `squeeze`; Radar, September 2024; **1st Place, DeFi**. The detailed submission describes lending developer-seeded liquidity positions to enable long/short leverage from launch. **Overlap:** creator-seeded capital, new-token leverage, and liquidation concerns. **Our proposed difference:** a market's dynamic commitment and backing-deployment policy. Creator seeding is a useful component, but this record rules out presenting that component as an untouched idea.
-
-- **[Archer Exchange](https://colosseum.com/projects/explore/archer-exchange)** — `archer-exchange`; Cypherpunk, September 2025; **4th Place, DeFi; accelerator C4**. Its submission describes dual flow batch auctions intended to reduce maker adverse selection and latency competition. **Overlap:** onchain auction execution and maker incentives. **Our proposed difference:** funding the risk behind settlement. Archer is an execution-design reference; a quote auction alone is not the novel part of our proposal, and our MVP does not claim to implement Archer's mechanism.
-
-- **[InsureOS](https://colosseum.com/projects/explore/insureos)** — `insureos`; Renaissance, March 2024. Its detailed submission proposes competing liquidity pools underwriting codebase risk for recurring premiums. **Overlap:** paying LPs to accept a defined loss exposure. **Our proposed difference:** observable perp backing stress and a constrained deployment path, rather than smart-contract vulnerability coverage. This is a useful precedent for making the insured event, premium payer, and loss bearer explicit.
-
-- **[Reflect Protocol](https://colosseum.com/projects/explore/reflect-protocol)** — `reflect-protocol`; Radar, September 2024; **Grand Prize; accelerator C2** under Reflect Money. Its submission describes autonomous hedging and responses to funding and OI metrics. **Overlap:** capital automation driven by risk state. **Our proposed difference:** underwriting a market's claim support, rather than a delta-neutral currency/carry strategy. Automated risk scores are not a substitute for proving the backing allocation and its economic return.
-
-**Winner and accelerator checks:** both filtered searches returned relevant adjacent work. The accelerator results included Archer and Reflect; the winner results included Squeeze and Archer, as well as honorable mentions. Prize metadata does not prove current adoption or mechanism safety. These findings establish component-level precedent; they do not prove that the exact proposed combination has or has not been built elsewhere.
+**Overlap vs. our proposed difference:** these establish component-level precedent for Percolator forks, long-tail perps, creator seeding, auctions, premium-for-loss underwriting and risk-driven automation. Our proposed difference is the combined commitment, deployment and funded-reward policy for a market's claim support, measured against equal-capital baselines. Prize metadata and submissions are not adoption or safety evidence, and none of this proves the exact combination has or has not been built elsewhere. The named records are kept in the private strategy repository.
 
 ### Archive insights that affect the design
 
@@ -172,7 +169,7 @@ These are historical submission records retrieved on 2026-09-09. Mechanism descr
 - **Build feasibility:** suitable for a narrow simulator and devnet prototype. The current Anchor scaffold and the unverified wrapper integration do not support calling the complete exchange an easy implementation.
 - **Best next proof:** demonstrate fewer payout impairments and acceptable LP net returns against native-rate and static-reserve baselines with equal capital. This is a stronger claim to test than “very high APY attracts liquidity.”
 
-Coverage: six project searches (`Percolator`; three mechanism/market searches; separate winner and accelerator searches), six detailed project records, two archive searches, and two complete archive documents. The `Percolator` entity search found Perc-o-dex; tangential semantic matches were excluded. Several searches reported additional results beyond the returned page, so this is a targeted benchmark rather than an exhaustive corpus audit. Scores and cluster sizes were not interpreted as uniqueness or market-size measurements. Authentication succeeded, and the API reported skill version `1.2.1`, matching the loaded skill.
+Coverage: a targeted set of project, winner, accelerator and archive searches, not an exhaustive corpus audit. Scores and cluster sizes were not interpreted as uniqueness or market-size measurements.
 
 ## 5. Recommended architecture
 

@@ -1,6 +1,6 @@
 # Moka Trade
 
-Moka Trade is a Solana perpetuals protocol for post-launch tokens that have defensible spot liquidity but no useful perp market. The first release is one isolated USDC market with an onchain pool maker, a pinned Percolator risk wrapper, an LP-scoped IOC matcher, and a separately funded domain backstop.
+Moka Trade is a Solana perpetuals protocol for post-launch tokens that have real spot liquidity but no useful perp market. Any token meeting onchain listing rules can be listed. Each token gets its own isolated Percolator market (own USDC vault, insurance and backing), a mark price read onchain from its deepest DEX pool, and an LP vault with maker shares (the counterparty) and backing shares (earning the engine's stress-responsive backing yield).
 
 ## Current status
 
@@ -22,7 +22,8 @@ Files under `docs/research/` are historical background. They never override the 
 | Path | Responsibility |
 | --- | --- |
 | `programs/matcher/` | LP-scoped IOC pricing and fill response |
-| `programs/backstop/` | Funded commitments, domain activation, rewards, and LP loss accounting |
+| `programs/lp-vault/` | Per-token LP vault: maker share class (maker portfolio) and backing share class (backing buckets) |
+| `programs/market-registry/` | Permissionless listing rules, market-group authority, DEX-pool oracle adapter |
 | `vendor/` | Reviewed upstream source snapshots; empty until P1 pins pass |
 | `crates/` | Shared Rust math, types, and test utilities |
 | `packages/sdk/` | Typed TypeScript account decoders and transaction builders |
@@ -36,5 +37,5 @@ Files under `docs/research/` are historical background. They never override the 
 
 ## Start here
 
-Begin with P0/R0 and P1 in the execution plan. Do not generate product code until the candidate Percolator engine/wrapper pair reproduces, its ABI is mapped, and the accounting transition harness passes.
+Follow M0–M4 in the execution plan. The upstream pin, route allowlist and reproduction recipe are in `docs/architecture/p1-upstream-reproduction.md`. Application programs start only after the M1 LiteSVM vertical slice passes against the pinned wrapper binary.
 
