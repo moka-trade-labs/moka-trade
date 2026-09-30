@@ -8,7 +8,7 @@
 
 | Path | Who pays | Measured / expected cost | Who controls it |
 | --- | --- | --- | --- |
-| Trader IOC (`TradeCpi`, one leg) | Trader | **~94k CU** observed in the upstream suite for a single-leg `TradeCpi`, of which the matcher CPI was **694 CU** (`auth_matcher`) | ~99% is the pinned Percolator wrapper and engine; our matcher is a rounding error |
+| Trader IOC (`TradeCpi`, one leg) | Trader | **~94k CU** observed in the upstream suite for a single-leg `TradeCpi`, (**not reproduced yet:** our harness measured 142k–187k CU per whole `TradeCpi` transaction in #11, including compute-budget instructions and first-leg setup; to be reconciled in #16), of which the matcher CPI was **694 CU** (`auth_matcher`) | ~99% is the pinned Percolator wrapper and engine; our matcher is a rounding error |
 | Mark update (our DEX-pool adapter → `PushAuthMark`) | Keeper (anyone) | To be measured in Phase 5: pool read + Pyth read + EMA + a wrapper CPI | Our adapter is small; the wrapper's `PushAuthMark` handler is not ours |
 | Liquidation/crank | Keeper | Upstream-bounded, tens to hundreds of k CU | Wrapper/engine |
 | LP deposit/redeem | LP | Our vault + wrapper deposit/backing CPIs | Shared |

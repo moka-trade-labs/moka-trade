@@ -261,3 +261,22 @@ fn sec_trade_cpi_requires_the_taker_owner() {
     assert_eq!(custom_error(&result), Some(err::UNAUTHORIZED), "{result:?}");
     assert_eq!(w.h.position(&w.alice).expect("alice").size_q, 0);
 }
+
+/// LP protection: a maker whose matcher grant caps fees below the market
+/// base fee cannot be traded against, so a base-fee change can never debit
+/// the unsigned LP more than it agreed to (P1 record §2.2, #411/#432).
+#[test]
+fn sec_lp_fee_cap_below_base_fee_blocks_trade_cpi() {
+    require_artifacts!();
+    let mut w = world(48, 10);
+    w.h.grant_matcher(&w.g, &w.maker, 5)
+        .expect("grant with a 5 bps cap");
+    let result =
+        w.h.trade_cpi(&w.g, &w.alice, &w.maker, CONTRACT, 10, 2 * ONE_DOLLAR);
+    assert_eq!(
+        custom_error(&result),
+        Some(err::INVALID_INSTRUCTION),
+        "{result:?}"
+    );
+    assert_eq!(w.h.position(&w.maker.trader).expect("maker").size_q, 0);
+}
