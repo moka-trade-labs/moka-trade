@@ -16,6 +16,7 @@ use solana_sdk::{
     program_pack::Pack,
     pubkey::Pubkey,
     signature::{keypair_from_seed, Keypair, Signer},
+    system_instruction,
     transaction::Transaction,
 };
 use spl_token::state::{Account as TokenAccount, AccountState, Mint};
@@ -86,6 +87,15 @@ pub struct MarketGroup {
     pub admin: Keypair,
     pub vault_authority: Pubkey,
     pub vault: Pubkey,
+}
+
+/// A trader (or maker) with a portfolio in one market group and a USDC wallet.
+#[derive(Debug)]
+pub struct Trader {
+    pub name: String,
+    pub signer: Keypair,
+    pub portfolio: Keypair,
+    pub usdc: Pubkey,
 }
 
 pub struct Harness {
@@ -208,6 +218,157 @@ impl Harness {
             ],
             &[admin],
         )
+    }
+
+    /// Funds a new trader with SOL for fees/rent and `usdc` atoms in a new
+    /// token account. The portfolio keypair is generated but not created.
+    pub fn new_trader(&mut self, name: &str, usdc: u64) -> Result<Trader, String> {
+        let signer = self.new_keypair();
+        let portfolio = self.new_keypair();
+        let wallet = self.new_keypair().pubkey();
+        self.svm
+            .airdrop(&signer.pubkey(), 10_000_000_000)
+            .map_err(|e| format!("airdrop {name}: {e:?}"))?;
+        self.set_token_account(&format!("{name}.usdc"), wallet, signer.pubkey(), usdc)?;
+        Ok(Trader {
+            name: name.to_owned(),
+            signer,
+            portfolio,
+            usdc: wallet,
+        })
+    }
+
+    /// Portfolio account size for a single-asset market group.
+    pub fn portfolio_len() -> Result<usize, String> {
+        state::portfolio_account_len_for_market_slots(usize::from(ASSETS_PER_GROUP))
+            .map_err(|e| format!("portfolio len: {e:?}"))
+    }
+
+    /// Rent-exempt lamports for a portfolio: the rent disclosed to users
+    /// (API-06A), which `ClosePortfolio` sweeps to the market account.
+    pub fn portfolio_rent(&self) -> Result<u64, String> {
+        Ok(self
+            .svm
+            .minimum_balance_for_rent_exemption(Self::portfolio_len()?))
+    }
+
+    /// Creates the portfolio account (paid by the trader) and runs
+    /// `InitPortfolio` in one transaction, as a client must: a separately
+    /// created, zeroed account could be initialized by someone else first.
+    pub fn open_portfolio(&mut self, group: &MarketGroup, t: &Trader) -> Result<u64, String> {
+        let create = system_instruction::create_account(
+            &t.signer.pubkey(),
+            &t.portfolio.pubkey(),
+            self.portfolio_rent()?,
+            u64::try_from(Self::portfolio_len()?).map_err(|_| "portfolio len")?,
+            &self.program_id,
+        );
+        let init = Instruction {
+            program_id: self.program_id,
+            accounts: vec![
+                AccountMeta::new(t.signer.pubkey(), true),
+                AccountMeta::new(group.market, false),
+                AccountMeta::new(t.portfolio.pubkey(), false),
+            ],
+            data: WrapperIx::InitPortfolio.encode(),
+        };
+        self.send(vec![create, init], &[&t.signer, &t.portfolio])
+    }
+
+    pub fn deposit(
+        &mut self,
+        group: &MarketGroup,
+        t: &Trader,
+        amount: u128,
+    ) -> Result<u64, String> {
+        let (portfolio_id, expected_sequence, _) = self.portfolio_bindings(t)?;
+        self.send_wrapper(
+            WrapperIx::Deposit {
+                portfolio_id,
+                expected_sequence,
+                amount,
+            },
+            vec![
+                AccountMeta::new(t.signer.pubkey(), true),
+                AccountMeta::new(group.market, false),
+                AccountMeta::new(t.portfolio.pubkey(), false),
+                AccountMeta::new(t.usdc, false),
+                AccountMeta::new(group.vault, false),
+                AccountMeta::new_readonly(spl_token::ID, false),
+            ],
+            &[&t.signer],
+        )
+    }
+
+    pub fn withdraw(
+        &mut self,
+        group: &MarketGroup,
+        t: &Trader,
+        amount: u128,
+    ) -> Result<u64, String> {
+        let (portfolio_id, expected_sequence, _) = self.portfolio_bindings(t)?;
+        self.send_wrapper(
+            WrapperIx::Withdraw {
+                portfolio_id,
+                expected_sequence,
+                amount,
+            },
+            vec![
+                AccountMeta::new(t.signer.pubkey(), true),
+                AccountMeta::new(group.market, false),
+                AccountMeta::new(t.portfolio.pubkey(), false),
+                AccountMeta::new(t.usdc, false),
+                AccountMeta::new(group.vault, false),
+                AccountMeta::new_readonly(group.vault_authority, false),
+                AccountMeta::new_readonly(spl_token::ID, false),
+            ],
+            &[&t.signer],
+        )
+    }
+
+    pub fn close_portfolio(&mut self, group: &MarketGroup, t: &Trader) -> Result<u64, String> {
+        let (portfolio_id, expected_sequence, position_epoch) = self.portfolio_bindings(t)?;
+        self.send_wrapper(
+            WrapperIx::ClosePortfolio {
+                portfolio_id,
+                expected_sequence,
+                position_epoch,
+            },
+            vec![
+                AccountMeta::new(t.signer.pubkey(), true),
+                AccountMeta::new(group.market, false),
+                AccountMeta::new(t.portfolio.pubkey(), false),
+            ],
+            &[&t.signer],
+        )
+    }
+
+    /// (portfolio id, matcher sequence, position epoch): replay bindings
+    /// every portfolio instruction must echo.
+    pub fn portfolio_bindings(&self, t: &Trader) -> Result<(u64, u64, u64), String> {
+        let data = self.account(&t.portfolio.pubkey())?.data;
+        let e = |what: &str, err: solana_sdk::program_error::ProgramError| {
+            format!("{}: decode {what}: {err:?}", t.name)
+        };
+        Ok((
+            state::read_portfolio_id(&data).map_err(|x| e("id", x))?,
+            state::read_portfolio_matcher_sequence(&data).map_err(|x| e("sequence", x))?,
+            state::read_portfolio_position_epoch(&data).map_err(|x| e("epoch", x))?,
+        ))
+    }
+
+    /// (owner, capital in USDC atoms) as recorded by the engine.
+    pub fn portfolio_state(&self, t: &Trader) -> Result<([u8; 32], u128), String> {
+        let data = self.account(&t.portfolio.pubkey())?.data;
+        let p = state::read_portfolio(&data).map_err(|e| format!("{}: {e:?}", t.name))?;
+        Ok((p.owner, p.capital.get()))
+    }
+
+    pub fn lamports(&self, key: &Pubkey) -> u64 {
+        self.svm
+            .get_account(key)
+            .map(|a| a.lamports)
+            .unwrap_or_default()
     }
 
     /// Decoded wrapper config and engine market group.
@@ -482,6 +643,26 @@ impl Snapshot {
         }
         out
     }
+}
+
+/// Wrapper error codes (`PercolatorError` in the pinned wrapper) that tests
+/// assert on, so a negative test cannot pass for the wrong reason.
+pub mod err {
+    pub const ALREADY_INITIALIZED: u32 = 2;
+    pub const UNAUTHORIZED: u32 = 8;
+    pub const INVALID_VAULT_ACCOUNT: u32 = 12;
+    /// The engine also returns this for `amount > capital` on withdraw and
+    /// for closing a portfolio that still holds capital or positions.
+    pub const ENGINE_LOCK_ACTIVE: u32 = 21;
+}
+
+/// The `Custom(n)` code of a failed wrapper instruction, if that is how it
+/// failed. `send` errors start with the transaction error's `Debug` form.
+pub fn custom_error(result: &Result<u64, String>) -> Option<u32> {
+    let err = result.as_ref().err()?;
+    let start = err.find("Custom(")?.checked_add("Custom(".len())?;
+    let rest = err.get(start..)?;
+    rest.get(..rest.find(')')?)?.parse().ok()
 }
 
 fn short(key: &Pubkey) -> String {

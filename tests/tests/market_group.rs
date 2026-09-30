@@ -2,7 +2,7 @@
 //! isolated single-asset market group (TEST-02, SEC-09).
 
 use moka_tests::artifacts_available;
-use moka_tests::svm::{Harness, MarketProfile};
+use moka_tests::svm::{custom_error, err, Harness, MarketProfile};
 use solana_sdk::signature::Signer;
 
 macro_rules! require_artifacts {
@@ -61,12 +61,10 @@ fn test_02_init_market_is_one_shot() {
         .expect("InitMarket");
     // Re-initializing a live market must fail, even for its own admin.
     let result = h.send_init_market(group.market, &group.admin, MarketProfile::default());
-    let err = result.expect_err("second InitMarket on a live market succeeded");
-    // PercolatorError::AlreadyInitialized = 2; instruction 3 follows the
-    // three compute-budget instructions the harness prepends.
-    assert!(
-        err.starts_with("InstructionError(3, Custom(2))"),
-        "unexpected error: {err}"
+    assert_eq!(
+        custom_error(&result),
+        Some(err::ALREADY_INITIALIZED),
+        "{result:?}"
     );
 }
 
