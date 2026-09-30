@@ -1,6 +1,6 @@
 [package]
 name = "moka-tests"
-description = "Integration tests against the pinned Percolator build (LiteSVM from Phase 2)"
+description = "Integration tests against the pinned Percolator build (LiteSVM)"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
@@ -10,6 +10,15 @@ publish.workspace = true
 [dependencies]
 moka-types.workspace = true
 sha2.workspace = true
+# Instruction encoders and state decoders come from the pinned wrapper itself
+# (the ABI source of truth). Same rev as scripts/pins.env WRAPPER_COMMIT;
+# tests/tests/pins.rs checks they agree. The engine rev comes transitively.
+percolator-prog = { git = "https://github.com/aeyakovenko/percolator-prog", rev = "5cb331dde354517c6371a8acf92cecb194f3bb73", features = ["no-entrypoint"] }
+percolator = { git = "https://github.com/aeyakovenko/percolator", rev = "4db11a8cb0053815e23a35d3a7d3edc265d8d866" }
+# Match the wrapper's own test stack (vendor/percolator-prog/Cargo.toml).
+litesvm = "=0.1.0"
+solana-sdk = "1.18"
+spl-token = { version = "4.0", features = ["no-entrypoint"] }
 
 [lints]
 workspace = true

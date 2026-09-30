@@ -68,8 +68,8 @@ Other useful commands:
 | --- | --- |
 | `crates/moka-types` | Pins (`pins.rs`) and fixed-point units (`units.rs`). `no_std`, no Solana dependency |
 | `crates/moka-math` | Checked `mul_div`/bps helpers with explicit rounding (CAP-07) |
-| `tests/` (`moka-tests`) | Integration-test crate. `load_pinned_program(name)` is the only way tests should load an upstream `.so` |
-| `programs/*` | Empty until Phase 3–5 |
+| `tests/` (`moka-tests`) | Integration tests. `src/svm.rs` is the LiteSVM harness (`Harness::new`, `init_market_group`, `send_wrapper`); `load_pinned_program(name)` is the only way to load an upstream `.so`. Wrapper instructions are encoded by the pinned `percolator-prog` crate (git dependency at `WRAPPER_COMMIT`) |
+| `programs/*` | Empty until Phases 3–5 |
 | `scripts/` | Toolchain, upstream build, SessionStart hook |
 
 Workspace lints (`Cargo.toml`) forbid `unsafe`, deny unchecked arithmetic, lossy casts, float arithmetic and `unwrap()`. Use `checked_*`, `try_from` and `moka-math`.
@@ -81,12 +81,21 @@ Workspace lints (`Cargo.toml`) forbid `unsafe`, deny unchecked arithmetic, lossy
 3. Put the spec requirement ID in every protocol test name or doc comment (e.g. `fn sec_09_market_groups_are_isolated()`).
 4. Update `docs/HANDOFF.md` §2/§8 before you stop if state or decisions changed.
 
-Phase 2 (next) adds LiteSVM to `tests/`:
+### Writing a Phase 2 test
 
-```bash
-cargo add -p moka-tests --dev litesvm       # version compatible with solana-program 3.x used by the wrapper
-cargo test -p moka-tests                     # runs the vertical slice against vendor/artifacts
+The harness uses `litesvm 0.1` and `solana-sdk 1.18` to match upstream's own tests. A new test looks like `tests/tests/market_group.rs`:
+
+```rust
+#[test]
+fn cap_13_deposit_reconciles() {
+    require_artifacts!();                        // skip when vendor/artifacts is missing
+    let mut h = Harness::new([1; 32]).unwrap();   // pinned wrapper + auth_matcher, USDC mint
+    let group = h.init_market_group(MarketProfile::default()).unwrap();
+    // h.send_wrapper(WrapperIx::..., accounts, &[&signer]) for each step
+}
 ```
+
+Run one file with `cargo test -p moka-tests --test market_group -- --nocapture`. For account lists and argument choices, read the matching helper in `vendor/percolator-prog/tests/support/v16_svm.rs` (e.g. `init_primary_portfolio`, `deposit_primary`, `trade_cpi`).
 
 ### Bumping a pin
 

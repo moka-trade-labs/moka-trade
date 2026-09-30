@@ -1,5 +1,15 @@
 //! Test support: locating and verifying the pinned upstream artifacts that
-//! `scripts/build-upstream.sh` writes to `vendor/artifacts/`.
+//! `scripts/build-upstream.sh` writes to `vendor/artifacts/`, plus the LiteSVM
+//! harness in [`svm`].
+
+/// True when `scripts/build-upstream.sh` has produced the program binaries.
+/// Tests that need them return early (with a note) when this is false, so
+/// `cargo test` still works on machines without the SBF toolchain.
+pub fn artifacts_available() -> bool {
+    artifacts_dir().join("percolator_prog.so").exists()
+}
+
+pub mod svm;
 
 use sha2::{Digest, Sha256};
 use std::collections::BTreeMap;

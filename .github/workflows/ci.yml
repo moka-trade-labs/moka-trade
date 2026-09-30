@@ -49,8 +49,9 @@ jobs:
           key: upstream-cargo-${{ hashFiles('scripts/pins.env') }}
       - run: scripts/setup-toolchain.sh
       - run: scripts/build-upstream.sh
-      - name: Verify artifacts from Rust (moka-tests)
-        run: cargo test -p moka-tests --locked --test pins
+      - uses: Swatinem/rust-cache@v2
+      - name: LiteSVM tests against the verified artifacts (moka-tests)
+        run: cargo test -p moka-tests --locked
       - uses: actions/upload-artifact@v4
         with:
           name: upstream-sbf

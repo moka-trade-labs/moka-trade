@@ -24,6 +24,22 @@ fn exe_01_pins_match_scripts() {
     );
 }
 
+/// The wrapper crate used for instruction encoding is the pinned commit.
+#[test]
+fn exe_01_test_crate_git_deps_use_pins() {
+    let manifest = fs::read_to_string(repo_root().join("tests/Cargo.toml")).unwrap_or_default();
+    for (repo, rev) in [
+        ("percolator-prog", pins::WRAPPER_COMMIT),
+        ("percolator", pins::ENGINE_COMMIT),
+    ] {
+        let line = manifest
+            .lines()
+            .find(|l| l.starts_with(&format!("{repo} = ")))
+            .unwrap_or_default();
+        assert!(line.contains(&format!("rev = \"{rev}\"")), "{repo}: {line}");
+    }
+}
+
 #[test]
 fn test_08_manifest_lists_every_program() {
     let hashes = pinned_hashes().expect("pin manifest");
