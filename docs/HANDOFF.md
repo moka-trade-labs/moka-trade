@@ -27,7 +27,7 @@ A Solana perpetuals DEX for freshly launched tokens that have a graduated DEX po
 | 8 | Sub-cent tokens: contract multiplier `10^k`; re-denominate by listing a new market group |
 | 9 | Our programs use only the SEC-10 route allowlist; no vendored patches for the MVP; a maintained fork is a Phase 14 decision |
 | 10 | Track progress with GitHub milestones (phases), issues and a project board; open issues after the planning PR merges |
-| 11 | The public repo holds no named competitor analysis, deployment details of other projects, positioning slogans or ranked roadmap strategy; those live in a private location chosen by the owner |
+| 11 | The public repo holds no named competitor analysis, deployment details of other projects, positioning slogans or ranked roadmap strategy; those live in the private repo `moka-trade-labs/strategy` |
 
 ## 4. Key findings to remember
 
