@@ -6,7 +6,10 @@
 //! instructions encoded by the pinned wrapper crate itself.
 
 use crate::load_pinned_program;
-use percolator_prog::{ix::Instruction as WrapperIx, state};
+use percolator_prog::{
+    ix::{CrankObservationHint, Instruction as WrapperIx},
+    state,
+};
 use solana_sdk::{
     account::Account,
     compute_budget::ComputeBudgetInstruction,
@@ -111,6 +114,19 @@ pub struct Maker {
     pub matcher_context: Pubkey,
     pub matcher_delegate: Pubkey,
 }
+
+/// A backing provider for one domain of a market group: its signer (the
+/// group's backing-bucket authority), USDC wallet and `BackingDomainLedger`.
+#[derive(Debug)]
+pub struct BackingProvider {
+    pub usdc: Pubkey,
+    pub ledger: Pubkey,
+}
+
+/// Backing domain of the group's single asset: `asset_index * 2 + side`.
+/// Domain 0 backs claims sourced from longs, domain 1 from shorts.
+pub const DOMAIN_LONG: u16 = 0;
+pub const DOMAIN_SHORT: u16 = 1;
 
 /// `auth_matcher` context size used by upstream's harness.
 const MATCHER_CONTEXT_LEN: usize = 320;
@@ -554,6 +570,30 @@ impl Harness {
         exec_price_e6: u64,
         fee_bps: u64,
     ) -> Result<u64, String> {
+        self.trade_no_cpi_with_backing_fee_cap(
+            group,
+            taker,
+            maker,
+            size_q,
+            exec_price_e6,
+            fee_bps,
+            0,
+        )
+    }
+
+    /// `TradeNoCpi` with an explicit `backing_fee_cap_bps`: the most backing
+    /// fee both owners consent to if the trade grows a backing lien.
+    #[allow(clippy::too_many_arguments)]
+    pub fn trade_no_cpi_with_backing_fee_cap(
+        &mut self,
+        group: &MarketGroup,
+        taker: &Trader,
+        maker: &Trader,
+        size_q: i128,
+        exec_price_e6: u64,
+        fee_bps: u64,
+        backing_fee_cap_bps: u16,
+    ) -> Result<u64, String> {
         let (a_id, _, a_epoch) = self.portfolio_bindings(taker)?;
         let (b_id, _, b_epoch) = self.portfolio_bindings(maker)?;
         let market_id = self.asset_market_id(group)?;
@@ -568,7 +608,7 @@ impl Harness {
                 size_q,
                 exec_price: exec_price_e6,
                 fee_bps,
-                backing_fee_cap_bps: 0,
+                backing_fee_cap_bps,
             },
             vec![
                 AccountMeta::new(taker.signer.pubkey(), true),
@@ -641,6 +681,220 @@ impl Harness {
             pnl: p.pnl.get(),
             fee_credits: p.fee_credits.get(),
         })
+    }
+
+    fn control_sequences(
+        &self,
+        group: &MarketGroup,
+    ) -> Result<state::AssetControlSequencesV16, String> {
+        let data = self.account(&group.market)?.data;
+        state::read_asset_control_sequences(&data, 0)
+            .map_err(|e| format!("control sequences: {e:?}"))
+    }
+
+    /// `PushAuthMark` for the group's asset at the current slot. Test-only
+    /// signer, as for `configure_mark`.
+    pub fn push_mark(&mut self, group: &MarketGroup, mark_e6: u64) -> Result<u64, String> {
+        let seq = self.control_sequences(group)?;
+        let market_id = self.asset_market_id(group)?;
+        self.send_wrapper(
+            WrapperIx::PushAuthMark {
+                asset_index: 0,
+                market_id,
+                now_slot: self.current_slot(),
+                mark_e6,
+                observation_sequence: seq
+                    .oracle_observation
+                    .checked_add(1)
+                    .ok_or("observation sequence")?,
+                authority_epoch: seq.authority_epoch,
+            },
+            vec![
+                AccountMeta::new(group.admin.pubkey(), true),
+                AccountMeta::new(group.market, false),
+            ],
+            &[&group.admin],
+        )
+    }
+
+    /// `PermissionlessCrank` of one portfolio at the current slot, signed only
+    /// by the harness payer (anyone may crank).
+    pub fn crank(&mut self, group: &MarketGroup, t: &Trader) -> Result<u64, String> {
+        let ix = Instruction {
+            program_id: self.program_id,
+            accounts: vec![
+                AccountMeta::new(self.payer.pubkey(), true),
+                AccountMeta::new(group.market, false),
+                AccountMeta::new(t.portfolio.pubkey(), false),
+            ],
+            data: WrapperIx::PermissionlessCrank {
+                now_slot: self.current_slot(),
+                observations: vec![CrankObservationHint {
+                    asset_index: 0,
+                    oracle_accounts: 0,
+                }],
+            }
+            .encode(),
+        };
+        self.send(vec![ix], &[])
+    }
+
+    /// `UpdateBackingFeePolicy` for one domain: `fee_bps` of consumed backing
+    /// is charged when a trade grows a lien on that domain's backing, and
+    /// `insurance_share_bps` of that fee goes to insurance, the rest to the
+    /// provider (`utilization_fee_earnings`).
+    pub fn set_backing_fee_policy(
+        &mut self,
+        group: &MarketGroup,
+        domain: u16,
+        fee_bps: u16,
+        insurance_share_bps: u16,
+    ) -> Result<u64, String> {
+        let seq = self.control_sequences(group)?;
+        let market_id = self.asset_market_id(group)?;
+        self.send_wrapper(
+            WrapperIx::UpdateBackingFeePolicy {
+                domain,
+                market_id,
+                fee_bps,
+                insurance_share_bps,
+                policy_sequence: seq
+                    .backing_fee
+                    .max(seq.authority_epoch)
+                    .checked_add(1)
+                    .ok_or("policy sequence")?,
+                authority_epoch: seq.authority_epoch,
+            },
+            vec![
+                AccountMeta::new(group.admin.pubkey(), true),
+                AccountMeta::new(group.market, false),
+            ],
+            &[&group.admin],
+        )
+    }
+
+    /// Funds the group admin (the default backing-bucket authority) with
+    /// `usdc` and creates its `BackingDomainLedger`. Test-only: in
+    /// production the LP vault PDA holds this role (BST-04, LP-08).
+    pub fn new_backing_provider(
+        &mut self,
+        group: &MarketGroup,
+        usdc: u64,
+    ) -> Result<BackingProvider, String> {
+        let wallet = self.new_keypair().pubkey();
+        self.set_token_account("provider.usdc", wallet, group.admin.pubkey(), usdc)?;
+        let ledger = self.new_keypair();
+        let len = state::backing_domain_ledger_account_len();
+        let create = system_instruction::create_account(
+            &self.payer.pubkey(),
+            &ledger.pubkey(),
+            self.svm.minimum_balance_for_rent_exemption(len),
+            u64::try_from(len).map_err(|_| "ledger len")?,
+            &self.program_id,
+        );
+        self.send(vec![create], &[&ledger])?;
+        Ok(BackingProvider {
+            usdc: wallet,
+            ledger: ledger.pubkey(),
+        })
+    }
+
+    /// `TopUpBackingBucket`: moves `amount` USDC from the provider into the
+    /// group vault as backing for `domain`, valid until `expiry_slot`.
+    pub fn top_up_backing(
+        &mut self,
+        group: &MarketGroup,
+        provider: &BackingProvider,
+        domain: u16,
+        amount: u128,
+        expiry_slot: u64,
+    ) -> Result<u64, String> {
+        let seq = self.control_sequences(group)?;
+        let market_id = self.asset_market_id(group)?;
+        let data = self.account(&group.market)?.data;
+        let profile = state::read_asset_oracle_profile(&data, 0)
+            .map_err(|e| format!("oracle profile: {e:?}"))?;
+        let (backing_fee_bps, insurance_share_bps) = if domain == DOMAIN_LONG {
+            (
+                profile.backing_trade_fee_bps_long,
+                profile.backing_trade_fee_insurance_share_bps_long,
+            )
+        } else {
+            (
+                profile.backing_trade_fee_bps_short,
+                profile.backing_trade_fee_insurance_share_bps_short,
+            )
+        };
+        self.send_wrapper(
+            WrapperIx::TopUpBackingBucket {
+                domain,
+                market_id,
+                intent_id: seq.backing_top_up.checked_add(1).ok_or("intent id")?,
+                authority_epoch: seq.authority_epoch,
+                backing_fee_bps,
+                insurance_share_bps,
+                amount,
+                expiry_slot,
+            },
+            vec![
+                AccountMeta::new(group.admin.pubkey(), true),
+                AccountMeta::new(group.market, false),
+                AccountMeta::new(provider.usdc, false),
+                AccountMeta::new(group.vault, false),
+                AccountMeta::new_readonly(spl_token::ID, false),
+                AccountMeta::new(provider.ledger, false),
+            ],
+            &[&group.admin],
+        )
+    }
+
+    /// `SyncBackingDomainLedger` for `domain`.
+    pub fn sync_backing_ledger(
+        &mut self,
+        group: &MarketGroup,
+        provider: &BackingProvider,
+        domain: u16,
+    ) -> Result<u64, String> {
+        self.send_wrapper(
+            WrapperIx::SyncBackingDomainLedger { domain },
+            vec![
+                AccountMeta::new(group.admin.pubkey(), true),
+                AccountMeta::new(group.market, false),
+                AccountMeta::new(provider.ledger, false),
+            ],
+            &[&group.admin],
+        )
+    }
+
+    /// `WithdrawBackingBucketEarnings`: pays `amount` of the domain's
+    /// `utilization_fee_earnings` to the provider's wallet.
+    pub fn withdraw_backing_earnings(
+        &mut self,
+        group: &MarketGroup,
+        provider: &BackingProvider,
+        domain: u16,
+        amount: u128,
+    ) -> Result<u64, String> {
+        let seq = self.control_sequences(group)?;
+        let market_id = self.asset_market_id(group)?;
+        self.send_wrapper(
+            WrapperIx::WithdrawBackingBucketEarnings {
+                domain,
+                market_id,
+                authority_epoch: seq.authority_epoch,
+                amount,
+            },
+            vec![
+                AccountMeta::new(group.admin.pubkey(), true),
+                AccountMeta::new(group.market, false),
+                AccountMeta::new(provider.ledger, false),
+                AccountMeta::new(provider.usdc, false),
+                AccountMeta::new(group.vault, false),
+                AccountMeta::new_readonly(group.vault_authority, false),
+                AccountMeta::new_readonly(spl_token::ID, false),
+            ],
+            &[&group.admin],
+        )
     }
 
     /// Decoded wrapper config and engine market group.

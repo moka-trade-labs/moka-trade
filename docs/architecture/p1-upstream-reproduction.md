@@ -154,7 +154,7 @@ Status legend: **Mapped** = instruction located in source, spec role assigned, n
 | Domain backing top-up (BST-03/04, CAP-09) | `TopUpBackingBucket` (24) | Binds generation, authority epoch, monotonic `intent_id`, future `expiry_slot` | Needed-MVP |
 | Backing withdrawal (BST-06) | `WithdrawBackingBucket` (50) | Native encumbrance checks | Needed-MVP |
 | Backing yield withdrawal | `WithdrawBackingBucketEarnings` (52) | Utilization-fee earnings | Needed-MVP |
-| Backing fee policy | `UpdateBackingFeePolicy` (51) | Kink curve + trade fee + insurance share | Needed-MVP |
+| Backing fee policy | `UpdateBackingFeePolicy` (51) | Per-domain backing trade fee (charged on lien growth) + insurance share. **Corrected by #12:** it does *not* set the per-slot kink curve. That curve (`backing_fee_base_rate_e9_per_slot`, slopes) is fixed at 0 by `InitMarket` (`V16Config::public_user_fund`) and no wrapper instruction changes it | Needed-MVP |
 | Loss/recovery ledger (BST-05) | `SyncBackingDomainLedger` (53) | `cumulative_loss_atoms` / `cumulative_recovery_atoms` | Needed-MVP |
 | Insurance top-ups | `TopUpInsurance` (9) / `TopUpInsuranceDomain` (56) | Separate tranche only (BST-04) | Later |
 | Insurance ledger / live withdrawal | `SyncInsuranceLedger` (54) / `WithdrawInsuranceAsset` (57) | | Later |
