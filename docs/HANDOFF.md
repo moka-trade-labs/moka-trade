@@ -14,6 +14,7 @@ A Solana perpetuals DEX for freshly launched tokens that have a graduated DEX po
 - **Verified in a cloud container:** a clean `setup-toolchain.sh && build-upstream.sh` (about 100 s + 4 min) reproduced all four pinned hashes, with the wrapper at `558778ee…546c` (P1 record §2). `cargo fmt/clippy -D warnings/test` pass.
 - **#9 LiteSVM harness: done, awaiting owner review.** `tests/src/svm.rs` provides the harness on the pinned wrapper + `auth_matcher` (hash-verified), `init_market_group`, and the CAP-13 helpers: `snapshot`, `trace` (before/after print) and `reconcile`. `reconcile` checks conservation (tracked balances = mint supply), custody (SPL vault = engine `vault`, upstream's census rule) and solvency (capital + insurance + backing earnings ≤ vault). `tests/tests/market_group.rs` has 6 tests, including one proving the custody check catches a direct vault donation. The workspace has **14 tests**. Harness stack: `percolator-prog` git dependency at the pin, `litesvm 0.1`, `solana-sdk 1.18`, matching upstream.
 - **#10 portfolio lifecycle: done on branch `phase-2/10-portfolio-lifecycle`, awaiting owner review.** The harness now has trader helpers: `new_trader`, `open_portfolio` (`create_account` + `InitPortfolio` in one transaction), `deposit`, `withdraw` and `close_portfolio`. `tests/tests/portfolio.rs` has 6 tests. Negative tests assert exact wrapper error codes via `custom_error`. The workspace has **20 tests**.
+- **#11 trades: done on branch `phase-2/11-trades`, awaiting owner review.** New harness helpers: `configure_mark`, `setup_maker`, `grant_matcher`, `set_matcher_spreads`, `trade_no_cpi`, `trade_cpi`, `position`. `tests/tests/trades.rs` has 9 tests, including the LP fee-cap protection added by the #11 audit. The workspace has **29 tests**. Findings are in §4 and §7. The audit corrected two docs: the P1 mitigation "matcher config set once, never re-granted" (wrong: it is revoked on non-matcher position changes) and the ~94k CU `TradeCpi` figure (not reproduced: 142k–187k per transaction in our harness; #16).
 - **Audit (2026-09-30), fixes applied:** toolchain tarballs are sha256-pinned (`pins.env`) and verified before an atomic install (fresh-install and tamper tests run); CI pins actions by commit SHA, installs Rust explicitly, sets `MOKA_REQUIRE_ARTIFACTS=1` so tests cannot pass vacuously, caches upstream target dirs, and has wider secret patterns; the overclaiming isolation test was renamed; docs corrected (`cargo-build-sbf` builds fully offline with `--skip-tools-install`; engine 197/197 re-verified **at `4db11a8c`**). Tarball hashes are trust-on-first-use: the owner is checking them against GitHub release digests (commands in session log).
 - **Upstream pin (unchanged):** wrapper `aeyakovenko/percolator-prog@5cb331dd` + engine `aeyakovenko/percolator@4db11a8c`, used unmodified.
 
@@ -34,12 +35,33 @@ A Solana perpetuals DEX for freshly launched tokens that have a graduated DEX po
 | 11 | The public repo holds no named competitor analysis, deployment details of other projects, positioning slogans or ranked roadmap strategy; those live in the private repo `moka-trade-labs/strategy` |
 | 12 | License: Apache-2.0 (`LICENSE`, same as upstream) |
 | 13 | Stop after each issue for owner review (from #10 on); branches named `phase-<N>/<issue>-<slug>` (`AGENTS.md`) |
+| 14 | Rent refunds: skipped. Keep decision 7 as is (disclose, don't subsidize). Accepted caveat: recovering rent via `CloseSlab` only happens at wind-down, so for a popular market it may never happen (2026-10-01) |
+| 15 | Trading fees stay with market insurance, by design: the aim is a strong insurance fund (2026-10-01) |
+| 16 | LPs are paid from trading fees through the engine's backing-fee policy (`backing_trade_fee_bps`), to be proven in #12 (2026-10-01) |
+| 17 | The maker (LP) tranche's return is its mark PnL as counterparty; no quote spread is expected (2026-10-01) |
+| 18 | The Phase 3 matcher quotes **exactly** the `oracle_price_e6` the wrapper passes it (the stored effective mark, which fills settle at), so a trader's limit applies to the real settlement price (closes the EXE-05 gap). The matcher only controls fill size: partial fills or rejection at capacity (MAT-02). A test must prove it never returns any other price. MAT-02/MAT-03 spread and rounding wording is revised when Phase 3 starts (2026-10-01) |
 
 ## 4. Key findings to remember
 
 - The wrapper is a multi-asset "market group"; a one-asset group is **3,003 bytes** (~0.022 SOL). A portfolio is **9,563 bytes** (~0.067 SOL). `ClosePortfolio` sweeps rent to the market account.
 - Upstream is research code run by an automated invariant-hunting loop. `tests/invariants/invariant_status.tsv` shows 0/89 proven and 8 `REFUTED_CURRENT`; `open_findings.tsv` lists ~165 open public-route findings. A red suite on `main` is its documented bug list.
 - Portfolio facts measured in #10: rent is exactly **67,449,360 lamports** (0.0674 SOL) for 9,563 bytes, paid by the trader. `ClosePortfolio` zeroes the account and moves **all** of it to the market account; the trader gets nothing back. Close needs an empty portfolio. After a market is **resolved** (mode 1), its `marketauth` may also close any portfolio. The engine reports both `amount > capital` on withdraw and "portfolio not empty" on close as `EngineLockActive` (21), not a dedicated error. Deposit and withdraw need no oracle configuration.
+- **Price modes in the pinned wrapper** (`ORACLE_MODE_*`; README "AuthMark and EwmaMark modes"):
+    - `AUTH_MARK` (3, ours): an authority (our adapter PDA) pushes the mark. Trades never move it, and there are no mark-movement fees.
+    - `EWMA_MARK` (2): an authority pushes a smoothed index, and trades move the mark toward their agreed price, clamped per slot. The wrapper charges dynamic mark-movement fees, and funding comes from the mark–index premium.
+    - `HYBRID_AFTER_HOURS` (1): an external Pyth composite is the index while it is fresh. Once it goes soft-stale, it falls back to a trade-driven EWMA mark with mark-movement fees.
+    - `MANUAL` (0): not documented as a trading mode in the README; unverified.
+    - In every mode, fills settle at the stored effective mark. EWMA/Hybrid let trades move that mark and charge for it, but they do not pay a quote spread to the maker. EWMA and Hybrid are forbidden in the MVP (P1 record §2.2). Hybrid/EWMA/composite oracles are among the areas with failing upstream tests (P1 §2.1, part of 87 behavioural failures), and memecoins have no Pyth feed for Hybrid (P1 table: Phase 12, large tokens only).
+- **Trade economics measured in #11** (source-verified, pinned by tests):
+    - `TradeCpi` charges only the market's `trade_fee_base_bps`, fixed at `InitMarket`. The LP does not sign, and the taker's `fee_bps` is only its consent bound. This explains upstream INV-047.
+    - Trading fees go to market **insurance**, not to the maker.
+    - In AuthMark mode **every fill settles at the mark**. The engine uses the execution price only as fee notional (upstream comment `F-TRADENOCPI-FEE`), so a matcher spread moves no value to the maker.
+    - Any maker position change outside a matcher fill (e.g. `TradeNoCpi`) **revokes the matcher grant** until `SetMatcherConfig` is renewed.
+- **Rent recovery findings (2026-09-30; the owner decides the policy):** only two instructions move lamports.
+    - `ClosePortfolio` moves the portfolio's whole rent to the market account.
+    - `CloseSlab` moves the market account's lamports, minus a small tombstone reserve, to the signing `marketauth`. It requires the market to be resolved (mode 1), zero capital and zero materialized portfolios. After resolution, `marketauth` may close any remaining portfolio.
+    - While a market is live, no instruction moves lamports out of the market account.
+- **LP withdrawals need fresh state:** a maker holding a position could not `Withdraw` (`EngineStale`, 19) in a scratch check during the #11 audit. LP redemptions (Phase 4) must crank first. To be pinned by a test in #12/#13.
 - The core-route risks to test in Phase 2 are listed in P1 record §2.2. The top one is CPI backing-fee consent, #223/#224 (an "LP siphon").
 - Other Percolator-based venues exist; some run maintained forks rather than upstream pins, so their versions are not comparable to ours. Competitive analysis is kept outside this public repository by owner decision (2026-09-30).
 - Native dynamic yield: `rate = base + slope·util/kink` below the kink, steeper above it. The unit is 1e-9 per slot (≈7.9% APR per unit at 400 ms slots). It is charged to lien holders and paid to the backing bucket.
@@ -77,6 +99,8 @@ A Solana perpetuals DEX for freshly launched tokens that have a graduated DEX po
 - Surfpool cheatcode names for Pyth refresh and time travel (verify in Phase 6).
 - Initial parameter profile (spreads, caps `α/β`, kink curve, leverage): calibration blocker (TEST-06), needed before Phase 8.
 - Whether to add the maintained fork before mainnet (Phase 14 criteria in `fork-strategy.md`).
+- **Maker earnings: decided** (decisions 15–17). Open follow-up: which price mode, if any, should replace AuthMark later. The owner asked for the options (2026-10-01); see the #11 notes in §4.
+- **EXE-05 gap: resolved by decision 18** (matcher quotes exactly the mark). The spec's MAT-02/MAT-03 text is still to be revised at the start of Phase 3.
 
 ## 8. Session log
 
@@ -84,4 +108,5 @@ A Solana perpetuals DEX for freshly launched tokens that have a graduated DEX po
 - **2026-09-30, session 2** (Claude Code on the web): PR #1 merged. Created issues #2–#35 from the backlog (labels only, no milestones). Implemented Phase 1 (#2–#7): toolchain and upstream build scripts with a committed hash manifest, a strict-lint Cargo workspace, CI, templates, the SessionStart hook and `docs/development.md`. Reproduced all pinned hashes from a clean build. Found that upstream's own LiteSVM harness (`vendor/percolator-prog/tests/support/v16_svm.rs`, 6.2k lines, `litesvm 0.1` + `solana-sdk 1.18`) already drives every Phase 2 flow.
 - **2026-09-30, session 2 (cont.):** owner-requested senior audit of the session's work (items 1–9); applied fixes 1–6 and 9, added owner decisions 12–13, finished #9 with the CAP-13 helpers, and added the `InitMarket` pre-initialization note to #24.
 - **2026-09-30, session 2 (cont.):** PR #36 merged: Phase 1 done, #9 done. Implemented #10.
-- **Next session starts here:** (1) owner reviews the #10 PR. (2) If the owner confirms the tarball digests, change "trust on first use" in `scripts/pins.env` to "verified". (3) After the owner reviews #10: #11 trades (`TradeNoCpi`, then `TradeCpi` via `auth_matcher`), **one issue, then stop for review**. It needs `ConfigureAuthMark` and the matcher context setup from `v16_svm.rs` (`init_matcher`, `trade_cpi`).
+- **2026-09-30, session 2 (cont.):** #10 merged (PR #37). Implemented #11 and found the trade-economics facts in §4.
+- **Next session starts here:** (1) owner reviews the #11 PR. (2) If the owner confirms the tarball digests, change "trust on first use" in `scripts/pins.env` to "verified". (3) After the owner reviews #11: #12 backing flow (it must show whether `backing_trade_fee_bps` pays trading fees to the backing tranche, per decision 16, and pin the maker `Withdraw` `EngineStale` finding) (`TopUpBackingBucket`, shock, liens, `SyncBackingDomainLedger`, earnings), including whether `backing_trade_fee_bps` can pay trading fees to the backing tranche. **One issue, then stop for review.**

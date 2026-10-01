@@ -44,6 +44,10 @@ pub struct MarketProfile {
     pub maintenance_margin_bps: u64,
     pub initial_margin_bps: u64,
     pub max_trading_fee_bps: u64,
+    /// The only fee `TradeCpi` charges: the LP does not sign CPI trades, so
+    /// the wrapper debits it only this market-wide base fee (the taker's
+    /// `fee_bps` is just its signed upper bound). Fixed at listing.
+    pub trade_fee_base_bps: u64,
     pub liquidation_fee_bps: u64,
     pub liquidation_fee_cap: u128,
     pub min_liquidation_abs: u128,
@@ -67,6 +71,7 @@ impl Default for MarketProfile {
             maintenance_margin_bps: 10_000,
             initial_margin_bps: 10_000,
             max_trading_fee_bps: 10_000,
+            trade_fee_base_bps: 0,
             liquidation_fee_bps: 0,
             liquidation_fee_cap: 0,
             min_liquidation_abs: 0,
@@ -97,6 +102,18 @@ pub struct Trader {
     pub portfolio: Keypair,
     pub usdc: Pubkey,
 }
+
+/// A maker whose portfolio is bound to the pinned `auth_matcher`, which fills
+/// any size at the oracle price adjusted by its configured spreads.
+#[derive(Debug)]
+pub struct Maker {
+    pub trader: Trader,
+    pub matcher_context: Pubkey,
+    pub matcher_delegate: Pubkey,
+}
+
+/// `auth_matcher` context size used by upstream's harness.
+const MATCHER_CONTEXT_LEN: usize = 320;
 
 pub struct Harness {
     pub svm: litesvm::LiteSVM,
@@ -197,7 +214,7 @@ impl Harness {
                 maintenance_margin_bps: p.maintenance_margin_bps,
                 initial_margin_bps: p.initial_margin_bps,
                 max_trading_fee_bps: p.max_trading_fee_bps,
-                trade_fee_base_bps: 0,
+                trade_fee_base_bps: p.trade_fee_base_bps,
                 liquidation_fee_bps: p.liquidation_fee_bps,
                 liquidation_fee_cap: p.liquidation_fee_cap,
                 min_liquidation_abs: p.min_liquidation_abs,
@@ -369,6 +386,261 @@ impl Harness {
             .get_account(key)
             .map(|a| a.lamports)
             .unwrap_or_default()
+    }
+
+    /// Advances the SVM clock to `slot` (never backwards).
+    pub fn warp_to_slot(&mut self, slot: u64) {
+        if slot > self.current_slot() {
+            self.svm.warp_to_slot(slot);
+        }
+    }
+
+    pub fn current_slot(&self) -> u64 {
+        self.svm.get_sysvar::<solana_sdk::clock::Clock>().slot
+    }
+
+    fn asset_market_id(&self, group: &MarketGroup) -> Result<u64, String> {
+        let (_, engine) = self.market_state(group)?;
+        Ok(engine.assets.first().ok_or("no asset 0")?.market_id)
+    }
+
+    /// `ConfigureAuthMark` for the group's single asset. Test-only: the admin
+    /// key signs here; in production this role belongs to our oracle adapter
+    /// PDA and no human key pushes marks (ORC-08/09).
+    pub fn configure_mark(&mut self, group: &MarketGroup, mark_e6: u64) -> Result<u64, String> {
+        let data = self.account(&group.market)?.data;
+        let seq = state::read_asset_control_sequences(&data, 0)
+            .map_err(|e| format!("control sequences: {e:?}"))?;
+        let market_id = self.asset_market_id(group)?;
+        self.send_wrapper(
+            WrapperIx::ConfigureAuthMark {
+                asset_index: 0,
+                market_id,
+                now_slot: self.current_slot(),
+                initial_mark_e6: mark_e6,
+                observation_sequence: seq
+                    .oracle_observation
+                    .checked_add(1)
+                    .ok_or("observation sequence")?,
+                authority_epoch: seq.authority_epoch,
+            },
+            vec![
+                AccountMeta::new(group.admin.pubkey(), true),
+                AccountMeta::new(group.market, false),
+            ],
+            &[&group.admin],
+        )
+    }
+
+    /// Opens a maker portfolio, creates and initializes its `auth_matcher`
+    /// context in one transaction, and grants the matcher (`grant_matcher`).
+    pub fn setup_maker(
+        &mut self,
+        group: &MarketGroup,
+        name: &str,
+        usdc: u64,
+        trade_fee_cap_bps: u16,
+    ) -> Result<Maker, String> {
+        let trader = self.new_trader(name, usdc)?;
+        self.open_portfolio(group, &trader)?;
+        let context = self.new_keypair();
+        let matcher_delegate = Pubkey::find_program_address(
+            &[
+                b"matcher",
+                group.market.as_ref(),
+                trader.portfolio.pubkey().as_ref(),
+                trader.signer.pubkey().as_ref(),
+                self.matcher_program.as_ref(),
+                context.pubkey().as_ref(),
+            ],
+            &self.program_id,
+        )
+        .0;
+        let create = system_instruction::create_account(
+            &trader.signer.pubkey(),
+            &context.pubkey(),
+            self.svm
+                .minimum_balance_for_rent_exemption(MATCHER_CONTEXT_LEN),
+            u64::try_from(MATCHER_CONTEXT_LEN).map_err(|_| "context len")?,
+            &self.matcher_program,
+        );
+        let init = Instruction {
+            program_id: self.matcher_program,
+            accounts: vec![
+                AccountMeta::new_readonly(trader.signer.pubkey(), true),
+                AccountMeta::new_readonly(matcher_delegate, false),
+                AccountMeta::new(context.pubkey(), false),
+                AccountMeta::new_readonly(self.program_id, false),
+                AccountMeta::new_readonly(group.market, false),
+                AccountMeta::new_readonly(trader.portfolio.pubkey(), false),
+            ],
+            data: vec![2],
+        };
+        self.send(vec![create, init], &[&trader.signer, &context])?;
+        let maker = Maker {
+            trader,
+            matcher_context: context.pubkey(),
+            matcher_delegate,
+        };
+        self.grant_matcher(group, &maker, trade_fee_cap_bps)?;
+        Ok(maker)
+    }
+
+    /// `SetMatcherConfig`: binds the maker's current position episode to its
+    /// matcher. The wrapper clears this grant whenever the maker's position
+    /// changes outside a matcher fill (e.g. `TradeNoCpi`), so it must be
+    /// renewed after such a change.
+    pub fn grant_matcher(
+        &mut self,
+        group: &MarketGroup,
+        maker: &Maker,
+        trade_fee_cap_bps: u16,
+    ) -> Result<u64, String> {
+        let t = &maker.trader;
+        let (portfolio_id, expected_sequence, position_epoch) = self.portfolio_bindings(t)?;
+        let (_, engine) = self.market_state(group)?;
+        self.send_wrapper(
+            WrapperIx::SetMatcherConfig {
+                portfolio_id,
+                expected_sequence,
+                position_epoch,
+                asset_generation_frontier: engine.next_market_id,
+                enabled: 1,
+                trade_fee_cap_bps,
+                expiry_slot: u64::MAX,
+            },
+            vec![
+                AccountMeta::new(t.signer.pubkey(), true),
+                AccountMeta::new_readonly(group.market, false),
+                AccountMeta::new(t.portfolio.pubkey(), false),
+                AccountMeta::new_readonly(self.matcher_program, false),
+                AccountMeta::new_readonly(maker.matcher_context, false),
+                AccountMeta::new_readonly(maker.matcher_delegate, false),
+            ],
+            &[&t.signer],
+        )
+    }
+
+    /// `auth_matcher` spreads: sells to the taker at oracle x (1 + ask),
+    /// buys from it at oracle x (1 - bid). Test matcher only.
+    pub fn set_matcher_spreads(
+        &mut self,
+        maker: &Maker,
+        bid_spread_bps: u64,
+        ask_spread_bps: u64,
+    ) -> Result<u64, String> {
+        let mut data = vec![4];
+        data.extend_from_slice(&bid_spread_bps.to_le_bytes());
+        data.extend_from_slice(&ask_spread_bps.to_le_bytes());
+        let ix = Instruction {
+            program_id: self.matcher_program,
+            accounts: vec![
+                AccountMeta::new_readonly(maker.trader.signer.pubkey(), true),
+                AccountMeta::new(maker.matcher_context, false),
+            ],
+            data,
+        };
+        self.send(vec![ix], &[&maker.trader.signer])
+    }
+
+    /// `TradeNoCpi`: both owners sign and agree on price and size.
+    /// `size_q` > 0 makes the taker (account A) long; 1e6 = one contract.
+    pub fn trade_no_cpi(
+        &mut self,
+        group: &MarketGroup,
+        taker: &Trader,
+        maker: &Trader,
+        size_q: i128,
+        exec_price_e6: u64,
+        fee_bps: u64,
+    ) -> Result<u64, String> {
+        let (a_id, _, a_epoch) = self.portfolio_bindings(taker)?;
+        let (b_id, _, b_epoch) = self.portfolio_bindings(maker)?;
+        let market_id = self.asset_market_id(group)?;
+        self.send_wrapper(
+            WrapperIx::TradeNoCpi {
+                account_a_portfolio_id: a_id,
+                account_a_position_epoch: a_epoch,
+                account_b_portfolio_id: b_id,
+                account_b_position_epoch: b_epoch,
+                asset_index: 0,
+                market_id,
+                size_q,
+                exec_price: exec_price_e6,
+                fee_bps,
+                backing_fee_cap_bps: 0,
+            },
+            vec![
+                AccountMeta::new(taker.signer.pubkey(), true),
+                AccountMeta::new(maker.signer.pubkey(), true),
+                AccountMeta::new(group.market, false),
+                AccountMeta::new(taker.portfolio.pubkey(), false),
+                AccountMeta::new(maker.portfolio.pubkey(), false),
+            ],
+            &[&taker.signer, &maker.signer],
+        )
+    }
+
+    /// `TradeCpi`: only the taker signs; the maker's price and fill come from
+    /// its granted matcher. This is the MVP trade path (EXE-04).
+    pub fn trade_cpi(
+        &mut self,
+        group: &MarketGroup,
+        taker: &Trader,
+        maker: &Maker,
+        size_q: i128,
+        fee_bps: u64,
+        limit_price_e6: u64,
+    ) -> Result<u64, String> {
+        let (a_id, _, a_epoch) = self.portfolio_bindings(taker)?;
+        let (b_id, b_seq, b_epoch) = self.portfolio_bindings(&maker.trader)?;
+        let market_id = self.asset_market_id(group)?;
+        self.send_wrapper(
+            WrapperIx::TradeCpi {
+                account_a_portfolio_id: a_id,
+                account_a_position_epoch: a_epoch,
+                account_b_portfolio_id: b_id,
+                account_b_position_epoch: b_epoch,
+                account_b_matcher_sequence: b_seq,
+                asset_index: 0,
+                market_id,
+                size_q,
+                fee_bps,
+                limit_price: limit_price_e6,
+                backing_fee_cap_bps: 0,
+            },
+            vec![
+                AccountMeta::new(taker.signer.pubkey(), true),
+                AccountMeta::new(group.market, false),
+                AccountMeta::new(taker.portfolio.pubkey(), false),
+                AccountMeta::new(maker.trader.portfolio.pubkey(), false),
+                AccountMeta::new_readonly(self.matcher_program, false),
+                AccountMeta::new(maker.matcher_context, false),
+                AccountMeta::new_readonly(maker.matcher_delegate, false),
+            ],
+            &[&taker.signer],
+        )
+    }
+
+    /// Signed position in the group's asset (`basis_pos_q`, 1e6 = one
+    /// contract; positive = long), with capital, PnL and fee credits.
+    pub fn position(&self, t: &Trader) -> Result<Position, String> {
+        let data = self.account(&t.portfolio.pubkey())?.data;
+        let p = state::read_portfolio(&data).map_err(|e| format!("{}: {e:?}", t.name))?;
+        let mut size_q: i128 = 0;
+        for leg in p.legs.iter() {
+            if leg.active != 0 && leg.asset_index.get() == 0 {
+                size_q = size_q
+                    .checked_add(leg.basis_pos_q.get())
+                    .ok_or("position overflow")?;
+            }
+        }
+        Ok(Position {
+            size_q,
+            capital: p.capital.get(),
+            pnl: p.pnl.get(),
+            fee_credits: p.fee_credits.get(),
+        })
     }
 
     /// Decoded wrapper config and engine market group.
@@ -594,6 +866,15 @@ impl Harness {
     }
 }
 
+/// One portfolio's exposure and balances, as the engine records them.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Position {
+    pub size_q: i128,
+    pub capital: u128,
+    pub pnl: i128,
+    pub fee_credits: i128,
+}
+
 /// Engine ledger totals for one market group, in USDC atoms.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Ledger {
@@ -650,6 +931,9 @@ impl Snapshot {
 pub mod err {
     pub const ALREADY_INITIALIZED: u32 = 2;
     pub const UNAUTHORIZED: u32 = 8;
+    /// Also returned for a taker fee consent below the market base fee and
+    /// for a matcher price outside the taker's limit.
+    pub const INVALID_INSTRUCTION: u32 = 9;
     pub const INVALID_VAULT_ACCOUNT: u32 = 12;
     /// The engine also returns this for `amount > capital` on withdraw and
     /// for closing a portfolio that still holds capital or positions.
