@@ -39,6 +39,7 @@ A Solana perpetuals DEX for freshly launched tokens that have a graduated DEX po
 | 15 | Trading fees stay with market insurance, by design: the aim is a strong insurance fund (2026-10-01) |
 | 16 | LPs are paid from trading fees through the engine's backing-fee policy (`backing_trade_fee_bps`), to be proven in #12 (2026-10-01) |
 | 17 | The maker (LP) tranche's return is its mark PnL as counterparty; no quote spread is expected (2026-10-01) |
+| 18 | The Phase 3 matcher quotes **exactly** the `oracle_price_e6` the wrapper passes it (the stored effective mark, which fills settle at), so a trader's limit applies to the real settlement price (closes the EXE-05 gap). The matcher only controls fill size: partial fills or rejection at capacity (MAT-02). A test must prove it never returns any other price. MAT-02/MAT-03 spread and rounding wording is revised when Phase 3 starts (2026-10-01) |
 
 ## 4. Key findings to remember
 
@@ -99,7 +100,7 @@ A Solana perpetuals DEX for freshly launched tokens that have a graduated DEX po
 - Initial parameter profile (spreads, caps `α/β`, kink curve, leverage): calibration blocker (TEST-06), needed before Phase 8.
 - Whether to add the maintained fork before mainnet (Phase 14 criteria in `fork-strategy.md`).
 - **Maker earnings: decided** (decisions 15–17). Open follow-up: which price mode, if any, should replace AuthMark later. The owner asked for the options (2026-10-01); see the #11 notes in §4.
-- **EXE-05 gap (from the #11 audit):** the taker's limit is checked against the matcher's `exec_price`, but the fill settles at the mark, and the wrapper applies no band between the two (only `exec_price != 0`). A matcher quote on the right side of the limit can therefore fill a taker at a mark that is past it. If the Phase 3 matcher returns `exec_price` equal to the oracle price it receives, the limit check becomes a check on the real settlement price. This touches MAT-02/MAT-03 (quote and rounding rules that move no value today) and is an owner decision alongside the maker-earnings question above.
+- **EXE-05 gap: resolved by decision 18** (matcher quotes exactly the mark). The spec's MAT-02/MAT-03 text is still to be revised at the start of Phase 3.
 
 ## 8. Session log
 
